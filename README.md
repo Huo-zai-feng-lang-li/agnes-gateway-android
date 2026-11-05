@@ -15,6 +15,8 @@
 - **自动 DNS 适配**：App 读取当前网络的系统 DNS 注入内核，内核自建解析器并并行探测可用 DNS（含国内公共 DNS 兜底），彻底规避安卓子进程 `/etc/resolv.conf` 缺失导致的 `lookup ... :53: connection refused`。
 - **双地址提示**：主 URL 固定为 `http://127.0.0.1:8080/v1`（手机内的 Agent 填这个，换网不用改），另附局域网地址供其他设备使用，均支持一键复制。
 
+> 📌 **当前版本：v1.0.2**。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+
 ---
 
 ## 🚀 两种使用姿态
@@ -48,10 +50,16 @@
    > ⚠️ 该 keystore 一旦丢失，后续版本将无法覆盖升级，请务必本地离线备份 `keystore/` 目录。
    > 早期 v1.0.0 使用 CI 临时 debug 证书，**与固定签名不兼容，需卸载一次旧版再安装**。
 
-4. **下载 APK 安装包**：
-   - 打开该 GitHub 仓库的 **Actions** 标签页；
-   - 点击刚刚运行的构建任务 `Build Android APK`；
-   - 在页面底部的 **Artifacts** 区域，直接下载打包好的 `AgnesGateway-APK.zip`（内含 `AgnesGateway-v1.0.1.apk`），解压即得可直接安装的 APK！
+4. **打 tag 触发正式发布（才会生成 Release）**：
+   ```bash
+   git tag v1.0.2
+   git push origin v1.0.2
+   ```
+   > 只有推送 `v*` 形式的 tag 才会构建签名 APK 并创建 GitHub Release；仅 `push main` 只上传 Artifact 且**不创建 Release**。
+
+5. **下载 APK 安装包**：
+   - **正式版（推荐）**：打开该 GitHub 仓库的 **Releases** 页面，下载最新 Release 中的 `AgnesGateway-v1.0.2.apk`，即签名可覆盖升级的安装包。
+   - **开发版**：在 **Actions** 标签页点开 `Build Android APK` 运行记录，页面底部的 **Artifacts** 区域可下载 `AgnesGateway-APK.zip`（仅 `push main` 时为 `AgnesGateway-dev-<提交短哈希>.apk`）。
 
 ---
 

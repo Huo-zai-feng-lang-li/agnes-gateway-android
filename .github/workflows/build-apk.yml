@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [ "main", "master" ]
-    tags: [ "v*" ]
+    tags: [ "v[0-9]*" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -71,7 +71,11 @@ jobs:
     - name: Rename APK Output
       run: |
         mkdir -p release-apk
-        TAG="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}"
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          TAG="$GITHUB_REF_NAME"
+        else
+          TAG="dev-${GITHUB_SHA::7}"
+        fi
         cp app/build/outputs/apk/release/app-release.apk "release-apk/AgnesGateway-${TAG}.apk"
         echo "APK build complete: AgnesGateway-${TAG}.apk"
 
@@ -82,20 +86,20 @@ jobs:
         path: release-apk/*.apk
 
     - name: Create or Update GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}
-        name: "Agnes 手机反代网关 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}"
+        tag_name: ${{ github.ref_name }}
+        name: "Agnes 手机反代网关 ${{ github.ref_name }}"
         body: |
-          ### Agnes 手机反代网关发布 🎉
+          ### Agnes 手机反代网关 ${{ github.ref_name }} 🎉
 
-          **更新亮点**：
-          - 修复手机内进程无法解析域名的问题：App 读取系统 DNS 注入内核，内核自建解析器并并行探测可用 DNS，彻底解决 `lookup agnes-ai.cn on [::1]:53: connection refused`。
-          - Base URL 主显示固定为 `http://127.0.0.1:8080/v1`，换网络无需改配置；局域网地址单独提示。
-          - 实时日志支持滚动并自动跟随到最新一行。
-          - 界面文案修正为「本地号池负载均衡 · 局域网极速反向代理」，并补充热更新号池使用说明。
-          - 接入固定 release 签名，后续版本可直接覆盖升级。
-          - 多 Key 轮询与 30s 智能退避重试，支持多轮工具调用透传；前台保活与看门狗自愈；运行中热更新号池。
+          完整变更说明见 [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)。
+
+          **安装说明**：
+          - 下载下方 `AgnesGateway-${{ github.ref_name }}.apk` 直接安装。
+          - 使用仓库固定 keystore 签名，可直接覆盖升级；从 v1.0.0（临时 debug 证书）升级需先卸载旧版。
+          - 若无法解析上游域名，请确认使用 v1.0.2 及以上版本（内核已内置自建 DNS 解析与公共 DNS 兜底）。
         files: release-apk/*.apk
         draft: false
         prerelease: false
