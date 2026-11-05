@@ -1,7 +1,7 @@
 # 会话接续状态
 
 ## 目标
-修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。本次会话完成收尾发版：递增到 v1.0.2 并推送 tag、补 CHANGELOG、修复 workflow 版本号硬编码缺陷。
+修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。已发布 v1.0.2（修复 workflow 版本号硬编码）。v1.0.3 修复上游根地址错误：原默认值 https://agnes-ai.cn 是官网首页，真实 API 根地址为 https://apihub.agnes-ai.cn/v1。
 
 ## 已完成（本次会话新增）
 8. 排查发版状态：本地 main(f2ac739) 含 DNS 修复但未推送；远程 tag v1.0.1 指向 0b7c41b（versionName 仍为 1.0.0），CI 已用旧内容产出 Release，修复内容实际未发布。
@@ -22,8 +22,21 @@
 17. **发版成功**：Release v1.0.2 已发布，资产 `AgnesGateway-v1.0.2.apk`；push main 那次运行 success 且**未**创建 Release，artifact 名为 `AgnesGateway-APK`（内含 `AgnesGateway-dev-f99c9de.apk`）。
 18. 待办（可选）：本地 `AgnesGateway-v1.0.0.apk` 与 release-apk/release-apk-v101 目录为旧构建产物，可考虑清理。
 
+19. **v1.0.3 根因修复：上游根地址错误**。用户手机刷新模型列表报 `HTTP 404: <!DOCTYPE html>`。取证发现 `https://agnes-ai.cn` 是官网首页（Next.js），`/v1/models` 与 `/v1/chat/completions` 均返回 HTML 404；真实 API 根地址为 `https://apihub.agnes-ai.cn/v1`（返回标准 OpenAI JSON，无 Key 时 401）。
+    - 已改：Go `--upstream` 默认值、Kotlin GatewayService/MainActivity 默认值、XML hint、main_test.go。
+    - 新增老配置迁移：`MainActivity.loadPreferences()` 中若读到的值仍是 `https://agnes-ai.cn`，自动替换为新地址。
+20. **本地真实端到端验证（关键，非只读代码）**：本地编译 Go 网关 + 真实 Key + **默认参数**（不手动指定 upstream）实测：
+    - `GET /v1/models` → 200，返回 9 个真实模型（agnes-2.5-flash / agnes-3.0-flash / agnes-2.5-pro-alpha / agnes-video-2.5 等）。
+    - `POST /v1/chat/completions` → 200，正常返回 reasoning_content + content。
+    - **多轮工具调用闭环**：第 1 轮 finish_reason=tool_calls 正确带 tool_calls；回传 role:tool 后第 2 轮正确续答（"北京今天晴朗，气温18度，空气质量良好"）。
+    - **流式 SSE**：stream=true 逐块 flush chunk 正常。
+    - 修前用旧二进制实测确为 404 text/html，形成对照。
+21. arm64 二进制重新交叉编译并同步 jniLibs（SHA256 = 1b5af9e6...c51a，两侧一致）；versionCode 4 / versionName 1.0.3。
+22. 清理本地测试残留：gateway_test*.exe 及其进程（EPERM 需先 Stop-Process 再删）。
+
 ## 未完成 / 下一步
-- 真机验证项（用户执行）：卸载旧 v1.0.0/v1.0.1 后安装 v1.0.2（签名从 debug 切固定 keystore，必须卸载重装）；启动后日志应出现 `[DNS] 可用 DNS 服务器: ...`；手机内 Agent 用 127.0.0.1 调通。
+- 待执行：提交 + push main + 打 tag v1.0.3 推送，CI 出签名 APK 与 Release。
+- 真机验证项（用户执行）：卸载旧版后安装 v1.0.3（签名从 debug 切固定 keystore，必须卸载重装）；确认上游地址输入框显示 `https://apihub.agnes-ai.cn/v1`（老版本会自动迁移）；刷新模型列表应出 9 个模型；手机内 Agent 用 `http://127.0.0.1:8080/v1` 调通并验证多轮工具调用。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
 ## 关键文件
@@ -43,4 +56,6 @@
 - CI 运行 42062784030（tag v1.0.2）与 42062770819（main）均 success（3m21s / 3m14s）。
 - gh（经 http://127.0.0.1:51081 代理）确认 Release v1.0.2 已发布，资产仅 `AgnesGateway-v1.0.2.apk`；Release 列表仍为 v1.0.0 / v1.0.1 / v1.0.2，无被 main 构建覆盖。
 - main 构建 artifact 名 `AgnesGateway-APK`（6.1MB，sha256 9663cee1…），head_sha f99c9de，验证硬编码修复生效。
+- v1.0.3 本地端到端实测取证：默认参数启动后 `/healthz` 返回 `"upstream":"https://apihub.agnes-ai.cn"`；`/v1/models` 200；工具调用两轮闭环通过；SSE chunk 正常。
+- 交叉编译二进制 SHA256：1b5af9e629bc357634348d378a8dd0aaae19f18a6a2766a1e9862bb682bfc51a（core 与 jniLibs 一致）。
 - 环境限制：本机无 JDK/Android SDK（java 不在 PATH），无法本地 assembleRelease，APK 由 GitHub Actions 产出。

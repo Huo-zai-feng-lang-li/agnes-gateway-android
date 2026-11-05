@@ -50,7 +50,7 @@ func maskKey(k string) string {
 
 func NewPoolManager(upstream string, cooldownSec int) *PoolManager {
 	if upstream == "" {
-		upstream = "https://agnes-ai.cn"
+		upstream = "https://apihub.agnes-ai.cn/v1"
 	}
 	upstream = strings.TrimSpace(upstream)
 	upstream = strings.TrimSuffix(upstream, "/")
@@ -543,7 +543,7 @@ func (s *GatewayServer) writeUpstreamError(w http.ResponseWriter, status int, bo
 
 func main() {
 	port := flag.Int("port", 8080, "网关监听端口")
-	upstream := flag.String("upstream", "https://agnes-ai.cn", "Agnes 上游根地址")
+	upstream := flag.String("upstream", "https://apihub.agnes-ai.cn/v1", "Agnes 上游根地址")
 	cooldown := flag.Int("cooldown", 120, "429 冷却时长(秒)")
 	retries := flag.Int("retries", 3, "故障自动重试次数")
 	keysFile := flag.String("keys-file", "", "包含 Key 列表的文件(一行一个)")

@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         savePreferences()
         val portStr = etPort.text.toString().trim()
         val port = portStr.toIntOrNull() ?: 8080
-        val upstream = etUpstream.text.toString().trim().ifEmpty { "https://agnes-ai.cn" }
+        val upstream = etUpstream.text.toString().trim().ifEmpty { "https://apihub.agnes-ai.cn/v1" }
         val keys = etKeys.text.toString().trim()
         val dns = getSystemDnsServers()
 
@@ -285,7 +285,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPreferences() {
         val sp = getSharedPreferences("gateway_config", Context.MODE_PRIVATE)
-        etUpstream.setText(sp.getString("upstream", "https://agnes-ai.cn"))
+        val savedUpstream = sp.getString("upstream", "https://apihub.agnes-ai.cn/v1") ?: "https://apihub.agnes-ai.cn/v1"
+        // 兼容历史版本遗留的旧官网地址，自动迁移为真实 API 根地址
+        etUpstream.setText(if (savedUpstream == "https://agnes-ai.cn") "https://apihub.agnes-ai.cn/v1" else savedUpstream)
         etPort.setText(sp.getString("port", "8080"))
         etKeys.setText(sp.getString("keys", ""))
     }

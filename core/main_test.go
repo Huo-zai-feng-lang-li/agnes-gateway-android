@@ -10,9 +10,9 @@ import (
 )
 
 func TestPoolManager_NormalizationAndMask(t *testing.T) {
-	pool := NewPoolManager("https://agnes-ai.cn/v1/", 120)
-	if pool.upstreamURL != "https://agnes-ai.cn" {
-		t.Fatalf("expected upstream to be normalized to https://agnes-ai.cn, got %q", pool.upstreamURL)
+	pool := NewPoolManager("https://apihub.agnes-ai.cn/v1/", 120)
+	if pool.upstreamURL != "https://apihub.agnes-ai.cn" {
+		t.Fatalf("expected upstream to be normalized to https://apihub.agnes-ai.cn, got %q", pool.upstreamURL)
 	}
 
 	keys := []string{
@@ -35,7 +35,7 @@ func TestPoolManager_NormalizationAndMask(t *testing.T) {
 }
 
 func TestPoolManager_RoundRobinAndCooldown(t *testing.T) {
-	pool := NewPoolManager("https://agnes-ai.cn", 60)
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
 	pool.SetKeys([]string{"key1", "key2", "key3"})
 
 	k1, total := pool.PickNext()
@@ -86,7 +86,7 @@ func TestNormalizeDNSServer(t *testing.T) {
 }
 
 func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
-	pool := NewPoolManager("https://agnes-ai.cn", 120)
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 120)
 	pool.SetKeys([]string{"init-key1"})
 	server := NewGatewayServer(pool, 8080, 2)
 

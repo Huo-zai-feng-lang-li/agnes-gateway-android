@@ -57,7 +57,7 @@ class GatewayService : Service() {
         }
 
         val port = intent?.getIntExtra(EXTRA_PORT, 8080) ?: 8080
-        val upstream = intent?.getStringExtra(EXTRA_UPSTREAM) ?: "https://agnes-ai.cn"
+        val upstream = intent?.getStringExtra(EXTRA_UPSTREAM) ?: "https://apihub.agnes-ai.cn/v1"
         val keys = intent?.getStringExtra(EXTRA_KEYS) ?: ""
         val dns = intent?.getStringExtra(EXTRA_DNS) ?: ""
 

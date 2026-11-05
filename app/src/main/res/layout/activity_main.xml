@@ -139,7 +139,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="#2C2C2C"
-                android:hint="https://agnes-ai.cn"
+                android:hint="https://apihub.agnes-ai.cn/v1"
                 android:padding="10dp"
                 android:textColor="#FFFFFF"
                 android:textColorHint="#666666"
