@@ -2,6 +2,19 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.6] - 2026-11-06
+
+### 新增
+- **日志点击全屏查看**：点击日志区域弹出横屏全屏窗口，空间更大、支持滚动与文本选择复制；全屏状态下新日志仍实时刷新并自动跟随。
+
+### 修复
+- **日志区域无法手动滚动**：日志框嵌在外层 ScrollView 中，触摸事件被外层拦截。现按下时拦截外层事件、抬手时释放，内层可独立上下滑动。
+- **日志重复显示的隐患**：`logStringBuilder` 曾被直接赋给 `TextView.text`，导致 TextView 内部持有同一实例，后续两处各追加一次造成重复。现改为传入副本。
+
+### 优化
+- **日志按级别分色**：成功绿 / 错误红 / 系统蓝 / 号池紫 / 分隔线灰 / 普通白，底色调整为 `#0D1117`，字号 12sp，行间距 2dp，对比度与可读性明显提升。
+- **全屏视图改增量追加**：原每次新日志都全量重建全屏文本（最多 500 行），现改为 `append`，仅在裁剪时重建一次。
+
 ## [v1.0.5] - 2026-11-06
 
 ### 新增
@@ -88,6 +101,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.6]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.5
 [v1.0.3]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.2
