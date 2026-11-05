@@ -2,9 +2,10 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [v1.0.4] - 2026-11-06
+## [v1.0.5] - 2026-11-06
 
 ### 新增
+- **打开 App 自动启动反代网关**：已配置 Key 的情况下，启动 App 即自动拉起网关，无需再手动点「启动」；未配置 Key 时跳过并写日志提示，避免空号池空转。服务已在运行时不会重复启动。
 - **成功请求日志**：此前仅在 429 / 401 / 转发失败时记录，正常调用完全无日志，导致本地调通后日志框空白。现每次成功请求输出一行元信息：
   ```
   [200] POST /v1/chat/completions model=agnes-2.5-flash | Key sk-x...piLR | 0.77s stream=true
@@ -87,7 +88,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
-[v1.0.4]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.4
+[v1.0.5]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.5
 [v1.0.3]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.2
 [v1.0.1]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.1

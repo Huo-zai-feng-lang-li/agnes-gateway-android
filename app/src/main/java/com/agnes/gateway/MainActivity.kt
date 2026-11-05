@@ -70,6 +70,22 @@ class MainActivity : AppCompatActivity() {
         updateUIState()
         requestNotificationPermission()
         checkForUpdates()
+        autoStartGatewayIfNeeded()
+    }
+
+    // 打开 App 时自动拉起反代网关：未运行且已配置 Key 时才启动，避免空号池空转
+    private fun autoStartGatewayIfNeeded() {
+        if (GatewayService.isRunning) return
+        if (etKeys.text.toString().trim().isEmpty()) {
+            appendLog("[系统] 未配置 Key，跳过自动启动")
+            return
+        }
+        tvStatus.postDelayed({
+            if (!GatewayService.isRunning && !isFinishing && !isDestroyed) {
+                appendLog("[系统] 检测到已配置 Key，自动启动反代网关")
+                startGatewayService()
+            }
+        }, 300)
     }
 
     // 启动时检查 GitHub Release 是否有新版本（6 小时内只检查一次，失败静默忽略）

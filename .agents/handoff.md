@@ -1,7 +1,7 @@
 # 会话接续状态
 
 ## 目标
-修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。已发布 v1.0.2（修复 workflow 版本号硬编码）。v1.0.3 修复上游根地址错误：原默认值 https://agnes-ai.cn 是官网首页，真实 API 根地址为 https://apihub.agnes-ai.cn/v1。v1.0.4 新增成功请求日志（含脱敏 Key）、启动时新版本检测，优化日志滚动智能跟随与清理策略。
+修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。已发布 v1.0.2（修复 workflow 版本号硬编码）。v1.0.3 修复上游根地址错误：原默认值 https://agnes-ai.cn 是官网首页，真实 API 根地址为 https://apihub.agnes-ai.cn/v1。v1.0.5 在 v1.0.4 基础上新增「打开 App 自动启动网关」；因版本号禁含数字 4 的规则，跳号发布为 v1.0.5。
 
 ## 已完成（本次会话新增）
 8. 排查发版状态：本地 main(f2ac739) 含 DNS 修复但未推送；远程 tag v1.0.1 指向 0b7c41b（versionName 仍为 1.0.0），CI 已用旧内容产出 Release，修复内容实际未发布。
@@ -43,8 +43,18 @@
     - 本地实测日志输出三行（models / chat / stream=true）均正确，脱敏 Key 正常。
     - versionCode 5 / versionName 1.0.4；arm64 二进制 SHA256 = 202f71c0...bb34（两侧一致）。
 
+24. **v1.0.5：打开 App 自动启动网关 + 发版跳 4**
+    - 新增 `autoStartGatewayIfNeeded()`：onCreate 中调用，若网关未运行且已配置 Key，延迟 300ms 自动拉起；未配置 Key 则写日志「未配置 Key，跳过自动启动」并跳过，避免空号池空转；已运行时不重复启动。
+    - **用户新规则：版本号任一位置禁止出现数字 4**，递增需跳过（1.0.3 → 1.0.5）。已写入 `.agents/rules/README.md`（新建规则总入口，含发版流程与上游接口取证）。
+    - 因 v1.0.4 已发布且含 4，本次直接升到 **versionCode 6 / versionName 1.0.5**，CHANGELOG 与 README 中的 v1.0.4 引用全部改为 v1.0.5。
+25. **Mika 兼容性问题取证（用户反馈）**：Mika（github.com/wangzan101/Mika）配置本网关后报 400 `input: data did not match any variant of untagged enum ResponseInput`。
+    - 实测结论：Agnes 上游（LiteLLM 代理）的 `/v1/responses` **不支持 `function_call` / `function_call_output` 类型**。纯文本 `input`（字符串或对象数组）可用；一旦包含工具调用回传即 400。
+    - 对照：`/v1/chat/completions` 完全正常，支持多轮工具调用、并行工具调用、`reasoning_content` 回传、SSE 流式。
+    - 结论：不是网关问题，是 Mika 使用了 Responses API 协议；需在 Mika 中把 provider 的接口类型选为 **OpenAI Chat Completions** 而非 Responses。
+
 ## 未完成 / 下一步
-- 待执行：提交 + push main + 打 tag v1.0.4 推送，CI 出签名 APK 与 Release。
+- 待执行：提交 + push main + 打 tag v1.0.5 推送，CI 出签名 APK 与 Release。
+- v1.0.4 的 Release 与 tag 保留历史（含数字 4，不再复用该号段）。
 - 真机验证项（用户执行）：卸载旧版后安装 v1.0.3（签名从 debug 切固定 keystore，必须卸载重装）；确认上游地址输入框显示 `https://apihub.agnes-ai.cn/v1`（老版本会自动迁移）；刷新模型列表应出 9 个模型；手机内 Agent 用 `http://127.0.0.1:8080/v1` 调通并验证多轮工具调用。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
