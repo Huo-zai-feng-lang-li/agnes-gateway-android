@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- 标题卡片 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Agnes 手机反代网关"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="本地号池负载均衡 · Cloudflare 网络极速反代"
+            android:textColor="#888888"
+            android:textSize="13sp" />
+
+        <!-- 状态卡片 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#1E1E1E"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="○ 已停止 (Stopped)"
+                    android:textColor="#9E9E9E"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnBatteryOpt"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="后台防杀保活"
+                    android:textColor="#64B5F6"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="局域网 Base URL (客户端配置此地址):"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvLocalUrl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="未启动"
+                    android:textColor="#00E676"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnCopyUrl"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:enabled="false"
+                    android:text="复制"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 配置卡片 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#1E1E1E"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="网关运行参数"
+                android:textColor="#E0E0E0"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <!-- 上游地址 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Agnes 上游根地址:"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etUpstream"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#2C2C2C"
+                android:hint="https://agnes-ai.cn"
+                android:padding="10dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#666666"
+                android:textSize="13sp" />
+
+            <!-- 监听端口 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="本地监听端口:"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etPort"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#2C2C2C"
+                android:hint="8080"
+                android:inputType="number"
+                android:padding="10dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#666666"
+                android:textSize="13sp" />
+
+            <!-- Key 号池输入 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Agnes Key 号池 (一行一个，支持粘贴多个 Key 轮询):"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etKeys"
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:layout_marginTop="4dp"
+                android:background="#2C2C2C"
+                android:gravity="top|start"
+                android:hint="sk-agnes-key1&#10;sk-agnes-key2&#10;sk-agnes-key3"
+                android:inputType="textMultiLine"
+                android:padding="10dp"
+                android:scrollbars="vertical"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#666666"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 控制按钮 -->
+        <Button
+            android:id="@+id/btnToggle"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="#2979FF"
+            android:text="启动反代网关"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- 实时控制台日志 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#1E1E1E"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="实时运行日志"
+                    android:textColor="#E0E0E0"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnClearLog"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="清空"
+                    android:textColor="#9E9E9E"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvLogs"
+                android:layout_width="match_parent"
+                android:layout_height="180dp"
+                android:layout_marginTop="6dp"
+                android:background="#0A0A0A"
+                android:fontFamily="monospace"
+                android:padding="8dp"
+                android:scrollbars="vertical"
+                android:textColor="#00E676"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
