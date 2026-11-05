@@ -51,6 +51,9 @@ func NewPoolManager(upstream string, cooldownSec int) *PoolManager {
 	if upstream == "" {
 		upstream = "https://agnes-ai.cn"
 	}
+	upstream = strings.TrimSpace(upstream)
+	upstream = strings.TrimSuffix(upstream, "/")
+	upstream = strings.TrimSuffix(upstream, "/v1")
 	upstream = strings.TrimSuffix(upstream, "/")
 	if cooldownSec <= 0 {
 		cooldownSec = 120
@@ -211,8 +214,16 @@ func (s *GatewayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 管理接口
+	// 管理接口 (仅限本机回环访问，杜绝局域网未授权修改)
 	if strings.HasPrefix(r.URL.Path, "/_gateway/") {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+			http.Error(w, `{"error":{"message":"Forbidden: 管理接口仅限本机内部调用","type":"forbidden"}}`, http.StatusForbidden)
+			return
+		}
 		s.handleInternalAPI(w, r)
 		return
 	}
@@ -338,13 +349,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 针对 429 速率限制退避重试
+		// 针对 429 速率限制退避重试 (30 秒灵敏冷却)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			errBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			s.pool.MarkCooldown(keyState, "429_rate_limit", 0)
+			s.pool.MarkCooldown(keyState, "429_rate_limit", 30*time.Second)
 			log.Printf("[429 限速] Key %s 触发 429，立即切换下一个 Key 重试 (尝试 %d/%d)", keyState.MaskedKey, attempt+1, s.maxRetries)
 			if totalKeys > 1 {
 				continue
@@ -368,13 +379,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 针对 5xx 临时错误重试
+		// 针对 5xx 临时错误重试 (15 秒冷却)
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			errBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 10*time.Second)
+			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 			if totalKeys > 1 {
 				continue
 			}
@@ -386,21 +397,41 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		s.pool.MarkSuccess(keyState)
 		defer resp.Body.Close()
 
-		// 复制响应头
+		// 复制响应头，清理 Hop-by-hop 头与 Content-Length（流式传输使用 chunked）
+		isSSE := strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 		for k, vv := range resp.Header {
+			if strings.EqualFold(k, "Connection") || strings.EqualFold(k, "Keep-Alive") ||
+				strings.EqualFold(k, "Transfer-Encoding") || strings.EqualFold(k, "Upgrade") {
+				continue
+			}
+			if isSSE && strings.EqualFold(k, "Content-Length") {
+				continue
+			}
 			for _, v := range vv {
 				w.Header().Add(k, v)
 			}
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 流式 Flush 透传（支持 SSE）
+		// 流式 Flush 透传（支持 SSE 与实时流式生成）
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
 		for {
+			select {
+			case <-r.Context().Done():
+				// 客户端主动中断（如停止生成、取消请求），快速 drain 剩余 buffer 并退出，保障连接池复用
+				io.CopyN(io.Discard, resp.Body, 64*1024)
+				return
+			default:
+			}
+
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
-				w.Write(buf[:n])
+				if _, wErr := w.Write(buf[:n]); wErr != nil {
+					// 客户端网络断开
+					io.CopyN(io.Discard, resp.Body, 64*1024)
+					return
+				}
 				if isFlusher {
 					flusher.Flush()
 				}

@@ -100,6 +100,7 @@ class GatewayService : Service() {
                     broadcastLog("[错误] 未找到核心二进制 libgateway.so，请确认安装包完整性！")
                     return@thread
                 }
+                binaryFile.setExecutable(true, false)
 
                 val cmdList = mutableListOf(
                     binaryFile.absolutePath,
@@ -134,10 +135,23 @@ class GatewayService : Service() {
 
                 val exitCode = proc.waitFor()
                 broadcastLog("[系统] 核心网关进程已退出，退出码: $exitCode")
+
+                // 如果服务未被手动停止且非正常退出，启动看门狗自愈
+                if (isRunning && exitCode != 0) {
+                    broadcastLog("[守护] 进程异常退出，2秒后尝试自动拉起...")
+                    Thread.sleep(2000)
+                    if (isRunning) {
+                        startGatewayProcess(port, upstream, keys)
+                        return@thread
+                    }
+                }
             } catch (e: Exception) {
                 broadcastLog("[错误] 启动核心网关异常: ${e.message}")
             } finally {
-                isRunning = false
+                // 如果并非自动重启链路，标记停止并释放硬件锁
+                if (!isRunning) {
+                    releaseLocks()
+                }
             }
         }
     }
@@ -185,7 +199,7 @@ class GatewayService : Service() {
         super.onDestroy()
         isRunning = false
         try {
-            process?.destroy()
+            process?.destroyForcibly()
         } catch (_: Exception) {
         }
         releaseLocks()

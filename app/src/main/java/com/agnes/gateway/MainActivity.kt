@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etUpstream: EditText
     private lateinit var etPort: EditText
     private lateinit var etKeys: EditText
+    private lateinit var btnReloadKeys: Button
     private lateinit var btnToggle: Button
     private lateinit var btnBatteryOpt: Button
     private lateinit var tvLogs: TextView
@@ -79,6 +80,7 @@ class MainActivity : AppCompatActivity() {
         etUpstream = findViewById(R.id.etUpstream)
         etPort = findViewById(R.id.etPort)
         etKeys = findViewById(R.id.etKeys)
+        btnReloadKeys = findViewById(R.id.btnReloadKeys)
         btnToggle = findViewById(R.id.btnToggle)
         btnBatteryOpt = findViewById(R.id.btnBatteryOpt)
         tvLogs = findViewById(R.id.tvLogs)
@@ -92,6 +94,10 @@ class MainActivity : AppCompatActivity() {
                 clipboard.setPrimaryClip(clip)
                 Toast.makeText(this, "已复制 Base URL 到剪贴板", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        btnReloadKeys.setOnClickListener {
+            reloadKeysToRunningGateway()
         }
 
         btnToggle.setOnClickListener {
@@ -109,6 +115,40 @@ class MainActivity : AppCompatActivity() {
         btnClearLog.setOnClickListener {
             logStringBuilder.clear()
             tvLogs.text = ""
+        }
+    }
+
+    private fun reloadKeysToRunningGateway() {
+        savePreferences()
+        val portStr = etPort.text.toString().trim()
+        val port = portStr.toIntOrNull() ?: 8080
+        val keys = etKeys.text.toString().trim()
+
+        kotlin.concurrent.thread {
+            try {
+                val url = java.net.URL("http://127.0.0.1:$port/_gateway/keys")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                conn.outputStream.use { os ->
+                    os.write(keys.toByteArray(Charsets.UTF_8))
+                }
+                val code = conn.responseCode
+                runOnUiThread {
+                    if (code == 200) {
+                        Toast.makeText(this, "号池已热更新生效！", Toast.LENGTH_SHORT).show()
+                        appendLog("[系统] 运行中号池热重载成功！")
+                    } else {
+                        Toast.makeText(this, "更新失败: HTTP $code", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "热更新失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -156,6 +196,7 @@ class MainActivity : AppCompatActivity() {
             btnToggle.setBackgroundColor(0xFFD32F2F.toInt()) // 红色
             etPort.isEnabled = false
             etUpstream.isEnabled = false
+            btnReloadKeys.visibility = android.view.View.VISIBLE
 
             val fullUrl = if (localIP != null) "http://$localIP:$port/v1" else "http://127.0.0.1:$port/v1"
             tvLocalUrl.text = fullUrl
@@ -167,6 +208,7 @@ class MainActivity : AppCompatActivity() {
             btnToggle.setBackgroundColor(0xFF2979FF.toInt()) // 蓝色
             etPort.isEnabled = true
             etUpstream.isEnabled = true
+            btnReloadKeys.visibility = android.view.View.GONE
 
             tvLocalUrl.text = if (localIP != null) "http://$localIP:$port/v1 (未启动)" else "未启动"
             btnCopyUrl.isEnabled = false
