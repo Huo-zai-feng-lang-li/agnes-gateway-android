@@ -48,6 +48,20 @@ func maskKey(k string) string {
 	return k[:4] + "..." + k[len(k)-4:]
 }
 
+// extractModelName 从请求体中提取 model 字段，仅用于日志展示，失败时返回空串
+func extractModelName(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var probe struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	return probe.Model
+}
+
 func NewPoolManager(upstream string, cooldownSec int) *PoolManager {
 	if upstream == "" {
 		upstream = "https://apihub.agnes-ai.cn/v1"
@@ -384,6 +398,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		r.Body.Close()
 	}
 
+	// 请求元信息（仅用于日志，不记录请求体/响应体，避免隐私与性能开销）
+	startTime := time.Now()
+	reqModel := extractModelName(reqBody)
+
 	var lastStatusCode int
 	var lastErrBody []byte
 
@@ -492,6 +510,19 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		w.WriteHeader(resp.StatusCode)
+
+		// 成功请求日志：只记录状态/路径/模型/脱敏 Key/耗时/是否流式
+		modelPart := ""
+		if reqModel != "" {
+			modelPart = " model=" + reqModel
+		}
+		streamPart := ""
+		if isSSE {
+			streamPart = " stream=true"
+		}
+		log.Printf("[%d] %s %s%s | Key %s | %.2fs%s",
+			resp.StatusCode, r.Method, r.URL.Path, modelPart,
+			keyState.MaskedKey, time.Since(startTime).Seconds(), streamPart)
 
 		// 流式 Flush 透传（支持 SSE 与实时流式生成）
 		flusher, isFlusher := w.(http.Flusher)

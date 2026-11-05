@@ -11,6 +11,8 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.method.ScrollingMovementMethod
@@ -18,8 +20,12 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -39,6 +45,15 @@ class MainActivity : AppCompatActivity() {
     private val logStringBuilder = StringBuilder()
     private var currentBaseUrl: String = ""
 
+    // 日志滚动保留上限：条数与时间双限，避免无界增长
+    private val logLines = ArrayDeque<Pair<Long, String>>()
+    private val maxLogLines = 500
+    private val maxLogAgeMs = 30 * 60 * 1000L
+    // 用户手动上翻时不强制回到底部，仅在其已贴底时自动跟随
+    private var autoScrollEnabled = true
+    private val scrollTolerancePx = 48
+
+
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val line = intent?.getStringExtra(GatewayService.EXTRA_LOG_LINE) ?: return
@@ -54,6 +69,64 @@ class MainActivity : AppCompatActivity() {
         loadPreferences()
         updateUIState()
         requestNotificationPermission()
+        checkForUpdates()
+    }
+
+    // 启动时检查 GitHub Release 是否有新版本（6 小时内只检查一次，失败静默忽略）
+    private fun checkForUpdates() {
+        val sp = getSharedPreferences("gateway_config", Context.MODE_PRIVATE)
+        val lastCheck = sp.getLong("last_update_check", 0L)
+        if (System.currentTimeMillis() - lastCheck < 6 * 60 * 60 * 1000L) return
+        sp.edit().putLong("last_update_check", System.currentTimeMillis()).apply()
+
+        Thread {
+            try {
+                val url = URL("https://api.github.com/repos/Huo-zai-feng-lang-li/agnes-gateway-android/releases/latest")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                }
+                if (conn.responseCode != 200) {
+                    conn.disconnect()
+                    return@Thread
+                }
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+
+                val json = JSONObject(body)
+                val latestTag = json.optString("tag_name").trim().removePrefix("v")
+                val htmlUrl = json.optString("html_url")
+                val current = packageManager.getPackageInfo(packageName, 0).versionName ?: return@Thread
+
+                if (latestTag.isNotEmpty() && compareVersion(latestTag, current) > 0) {
+                    Handler(Looper.getMainLooper()).post {
+                        AlertDialog.Builder(this)
+                            .setTitle("发现新版本 v$latestTag")
+                            .setMessage("当前版本 v$current，是否前往下载更新？")
+                            .setPositiveButton("前往下载") { _, _ ->
+                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(htmlUrl))) }
+                            }
+                            .setNegativeButton("稍后", null)
+                            .show()
+                    }
+                }
+            } catch (_: Exception) {
+                // 网络不可用或解析失败：静默忽略，不打扰用户
+            }
+        }.start()
+    }
+
+    // 语义化版本比较：返回 >0 表示 a 比 b 新
+    private fun compareVersion(a: String, b: String): Int {
+        val pa = a.split(".").map { it.toIntOrNull() ?: 0 }
+        val pb = b.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val va = pa.getOrElse(i) { 0 }
+            val vb = pb.getOrElse(i) { 0 }
+            if (va != vb) return va - vb
+        }
+        return 0
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -90,6 +163,11 @@ class MainActivity : AppCompatActivity() {
         btnBatteryOpt = findViewById(R.id.btnBatteryOpt)
         tvLogs = findViewById(R.id.tvLogs)
         tvLogs.movementMethod = ScrollingMovementMethod()
+        tvLogs.setOnScrollChangeListener { _, _, _, _, _ ->
+            // 仅当用户停留在底部附近时保持自动跟随，手动上翻后不再拽回
+            autoScrollEnabled = isNearBottom()
+        }
+
         btnClearLog = findViewById(R.id.btnClearLog)
 
         btnCopyUrl.setOnClickListener {
@@ -122,7 +200,9 @@ class MainActivity : AppCompatActivity() {
 
         btnClearLog.setOnClickListener {
             logStringBuilder.clear()
+            logLines.clear()
             tvLogs.text = ""
+            autoScrollEnabled = true
         }
     }
 
@@ -230,17 +310,60 @@ class MainActivity : AppCompatActivity() {
 
     private fun appendLog(msg: String) {
         runOnUiThread {
-            logStringBuilder.append(msg).append("\n")
-            if (logStringBuilder.length > 20000) {
-                logStringBuilder.delete(0, 5000)
+            val now = System.currentTimeMillis()
+            logLines.addLast(now to msg)
+
+            // 裁剪可能导致前缀变化，此时需整体重建一次；否则走增量追加
+            if (pruneLogs(now)) {
+                rebuildLogView()
+            } else {
+                if (logStringBuilder.isNotEmpty()) {
+                    logStringBuilder.append('\n')
+                    tvLogs.append("\n")
+                }
+                logStringBuilder.append(msg)
+                tvLogs.append(msg)
             }
-            tvLogs.text = logStringBuilder.toString()
-            tvLogs.post {
-                val layout = tvLogs.layout ?: return@post
-                val bottom = layout.getLineTop(tvLogs.lineCount)
-                tvLogs.scrollTo(0, (bottom - tvLogs.height).coerceAtLeast(0))
+
+            if (autoScrollEnabled) {
+                tvLogs.post { scrollToBottom() }
             }
         }
+    }
+
+    // 按条数与时间双限裁剪最旧日志；返回是否发生裁剪
+    private fun pruneLogs(now: Long): Boolean {
+        var pruned = false
+        while (logLines.isNotEmpty() && now - logLines.first().first > maxLogAgeMs) {
+            logLines.removeFirst()
+            pruned = true
+        }
+        while (logLines.size > maxLogLines) {
+            logLines.removeFirst()
+            pruned = true
+        }
+        return pruned
+    }
+
+    // 全量重建日志文本（仅裁剪时触发，频率低）
+    private fun rebuildLogView() {
+        logStringBuilder.clear()
+        logStringBuilder.append(logLines.joinToString("\n") { it.second })
+        tvLogs.text = logStringBuilder.toString()
+    }
+
+    private fun isNearBottom(): Boolean {
+        val layout = tvLogs.layout ?: return true
+        val bottom = layout.getLineTop(tvLogs.lineCount)
+        val visibleBottom = tvLogs.scrollY + tvLogs.height
+        return visibleBottom >= bottom - scrollTolerancePx
+    }
+
+    private fun scrollToBottom() {
+        val layout = tvLogs.layout ?: return
+        val bottom = layout.getLineTop(tvLogs.lineCount)
+        tvLogs.scrollTo(0, (bottom - tvLogs.height).coerceAtLeast(0))
+        autoScrollEnabled = true
     }
 
     private fun requestNotificationPermission() {

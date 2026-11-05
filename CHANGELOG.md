@@ -2,6 +2,28 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.4] - 2026-11-06
+
+### 新增
+- **成功请求日志**：此前仅在 429 / 401 / 转发失败时记录，正常调用完全无日志，导致本地调通后日志框空白。现每次成功请求输出一行元信息：
+  ```
+  [200] POST /v1/chat/completions model=agnes-2.5-flash | Key sk-x...piLR | 0.77s stream=true
+  ```
+  - 含状态码、方法、路径、model、**脱敏 Key（可判断本次用的是哪个账号）**、耗时、是否流式。
+  - 明确不打请求体 / 响应体 / 流式分块内容，避免隐私泄露与性能开销。
+- **启动时新版本检测**：读取 GitHub Release 最新 tag，与本地 versionName 比较，有新版时弹窗提示并提供跳转下载；6 小时内最多检查一次，网络失败静默忽略。
+
+### 优化
+- **日志滚动智能跟随**：此前每来一行都强制滚到底部，手动上翻会被立刻拽回。现仅当用户停留在底部附近时才自动跟随；手动上翻后不再打断阅读。点「清空日志」或手动回到底部即恢复跟随。
+- **日志清理策略改为条数 + 时间双限**：保留最近 500 条且不超过 30 分钟（原为按 20000 字符截断），内存可控且更符合排查习惯。
+- **日志渲染改为增量 append**：原每来一行就 `tvLogs.text = 全量字符串`，高频日志下开销大；现仅在裁剪发生时重建一次。
+
+### 验证（本地真实运行）
+- `[200] GET /v1/models | Key sk-x...piLR | 0.40s`
+- `[200] POST /v1/chat/completions model=agnes-2.5-flash | Key sk-x...piLR | 0.77s`
+- `[200] POST /v1/chat/completions model=agnes-2.5-flash | Key sk-x...piLR | 0.43s stream=true`
+- `go test ./...` 全绿；arm64 二进制重新交叉编译并同步（SHA256 = 202f71c0...bb34）。
+
 ## [v1.0.3] - 2026-11-06
 
 ### 修复（关键）
@@ -65,6 +87,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.4]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.4
 [v1.0.3]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.2
 [v1.0.1]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.1

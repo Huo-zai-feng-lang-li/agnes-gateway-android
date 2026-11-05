@@ -1,7 +1,7 @@
 # 会话接续状态
 
 ## 目标
-修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。已发布 v1.0.2（修复 workflow 版本号硬编码）。v1.0.3 修复上游根地址错误：原默认值 https://agnes-ai.cn 是官网首页，真实 API 根地址为 https://apihub.agnes-ai.cn/v1。
+修复 Agnes 手机反代网关三处问题：UI 文案、日志滚动、手机内无法解析上游域名；并把 Base URL 改为固定 127.0.0.1、接入固定 release 签名以支持覆盖升级。已发布 v1.0.2（修复 workflow 版本号硬编码）。v1.0.3 修复上游根地址错误：原默认值 https://agnes-ai.cn 是官网首页，真实 API 根地址为 https://apihub.agnes-ai.cn/v1。v1.0.4 新增成功请求日志（含脱敏 Key）、启动时新版本检测，优化日志滚动智能跟随与清理策略。
 
 ## 已完成（本次会话新增）
 8. 排查发版状态：本地 main(f2ac739) 含 DNS 修复但未推送；远程 tag v1.0.1 指向 0b7c41b（versionName 仍为 1.0.0），CI 已用旧内容产出 Release，修复内容实际未发布。
@@ -34,8 +34,17 @@
 21. arm64 二进制重新交叉编译并同步 jniLibs（SHA256 = 1b5af9e6...c51a，两侧一致）；versionCode 4 / versionName 1.0.3。
 22. 清理本地测试残留：gateway_test*.exe 及其进程（EPERM 需先 Stop-Process 再删）。
 
+23. **v1.0.4：日志与更新检测**
+    - 用户反馈：本地调通后日志框空白。根因：Go 侧只在 429/401/转发失败时打日志，成功请求完全无记录。已新增成功请求日志，格式 `[200] POST /v1/chat/completions model=agnes-2.5-flash | Key sk-x...piLR | 0.77s stream=true`，含状态码/方法/路径/model/脱敏Key/耗时/是否流式。明确不打请求体、响应体、流式分块。
+    - 用户问「会不会有性能问题」：已评估，每次一行约 100 字节，20k 字符截断下无压力；真正开销在 TextView 全量重设，已改为增量 append，仅裁剪时重建一次。
+    - 用户问「日志何时清除」：原只有 20000 字符滚动截断 + 手动清空 + 进程退出即丢，无时间维度。已改为条数(500) + 时间(30分钟)双限，不持久化（避免 Key 片段落盘）。
+    - 日志滚动智能跟随：新增 `autoScrollEnabled` + `isNearBottom()`（48px 容差），用户手动上翻不再被拽回；清空或回到底部恢复。
+    - 新增启动时新版本检测 `checkForUpdates()`：拉 GitHub releases/latest，`compareVersion()` 语义化比较，有新版弹 AlertDialog 跳转；6 小时节流；异常静默。
+    - 本地实测日志输出三行（models / chat / stream=true）均正确，脱敏 Key 正常。
+    - versionCode 5 / versionName 1.0.4；arm64 二进制 SHA256 = 202f71c0...bb34（两侧一致）。
+
 ## 未完成 / 下一步
-- 待执行：提交 + push main + 打 tag v1.0.3 推送，CI 出签名 APK 与 Release。
+- 待执行：提交 + push main + 打 tag v1.0.4 推送，CI 出签名 APK 与 Release。
 - 真机验证项（用户执行）：卸载旧版后安装 v1.0.3（签名从 debug 切固定 keystore，必须卸载重装）；确认上游地址输入框显示 `https://apihub.agnes-ai.cn/v1`（老版本会自动迁移）；刷新模型列表应出 9 个模型；手机内 Agent 用 `http://127.0.0.1:8080/v1` 调通并验证多轮工具调用。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
