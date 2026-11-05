@@ -24,6 +24,7 @@ import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
 import android.widget.EditText
@@ -425,20 +426,49 @@ class MainActivity : AppCompatActivity() {
         tvLogs.text = SpannableStringBuilder(logStringBuilder)
     }
 
-    // 根据日志前缀进行分色，提升可读性与对比度
+    // 根据日志内容进行行内局部高亮：时间戳灰、状态码按段分色加粗、Key 青色加粗
     private fun colorizeLog(msg: String): Spannable {
         val sp = SpannableStringBuilder(msg)
-        val color = when {
-            msg.startsWith("[200]") || msg.startsWith("[201]") -> 0xFF3FB950.toInt() // 成功绿
-            msg.startsWith("[400]") || msg.startsWith("[401]") || msg.startsWith("[403]") ||
-            msg.startsWith("[429]") || msg.startsWith("[500]") || msg.startsWith("[502]") ||
+
+        // 1. 基础色（整行）
+        val baseColor = when {
+            msg.contains("[400]") || msg.contains("[401]") || msg.contains("[403]") ||
+            msg.contains("[429]") || msg.contains("[500]") || msg.contains("[502]") ||
             msg.startsWith("[转发失败]") || msg.startsWith("[错误]") -> 0xFFF85149.toInt() // 错误红
             msg.startsWith("[系统]") || msg.startsWith("[DNS]") -> 0xFF58A6FF.toInt() // 系统蓝
             msg.startsWith("[号池]") || msg.startsWith("[守护]") -> 0xFFD2A8FF.toInt() // 号池紫
             msg.startsWith("===") -> 0xFF8B949E.toInt() // 分隔线灰
             else -> 0xFFE6EDF3.toInt() // 普通白
         }
-        sp.setSpan(ForegroundColorSpan(color), 0, msg.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sp.setSpan(ForegroundColorSpan(baseColor), 0, msg.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+        // 2. 时间戳特殊高亮 (YYYY/MM/DD HH:mm:ss.SSSSSS)
+        Regex("""^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d+""").find(msg)?.let {
+            sp.setSpan(ForegroundColorSpan(0xFF8B949E.toInt()), it.range.first, it.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
+        // 3. 状态码特殊高亮 [xxx]
+        Regex("""\[\d{3}\]""").findAll(msg).forEach {
+            val code = it.value.substring(1, 4).toIntOrNull() ?: 0
+            val codeColor = when {
+                code in 200..299 -> 0xFF3FB950.toInt() // 2xx 绿
+                code in 400..599 -> 0xFFF85149.toInt() // 4xx/5xx 红
+                else -> 0xFF58A6FF.toInt()
+            }
+            val start = it.range.first
+            val end = it.range.last + 1
+            sp.setSpan(ForegroundColorSpan(codeColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
+        // 4. Key 特殊高亮 (Key sk-x...piLR)
+        Regex("""Key\s+[^\s|]+""").findAll(msg).forEach {
+            val start = it.range.first
+            val end = it.range.last + 1
+            sp.setSpan(ForegroundColorSpan(0xFF00E5FF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // 青色
+            sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
         return sp
     }
 

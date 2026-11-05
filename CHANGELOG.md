@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.7] - 2026-11-06
+
+### 优化
+- **日志行内局部高亮**：提升日志阅读效率，突出关键信息
+  - **时间戳**：灰色呈现（`2026/11/06 01:45:51.123456`）
+  - **状态码**：按 HTTP 状态段分色并**加粗**（2xx 绿 / 4xx-5xx 红 / 其他蓝）
+  - **Key**：青色并**加粗**（`Key sk-x...piLR`），快速定位本次调用的账号
+  - 保留原有整行按级别分色逻辑
+
 ## [v1.0.6] - 2026-11-06
 
 ### 新增
@@ -101,6 +110,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.7]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.5
 [v1.0.3]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.3
