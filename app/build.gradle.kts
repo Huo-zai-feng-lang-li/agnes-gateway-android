@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// 固定 release 签名：优先环境变量（CI），其次 keystore/keystore.properties（本地）
+val keystorePropsFile = rootProject.file("keystore/keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+fun signingValue(envKey: String, propKey: String): String? =
+    System.getenv(envKey) ?: keystoreProps.getProperty(propKey)
+val keystorePath = signingValue("KEYSTORE_FILE", "storeFile")
 
 android {
     namespace = "com.agnes.gateway"
@@ -11,17 +22,33 @@ android {
         applicationId = "com.agnes.gateway"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         ndk {
             abiFilters.add("arm64-v8a")
         }
     }
 
+    signingConfigs {
+        val ksPath = keystorePath
+        if (ksPath != null) {
+            create("release") {
+                storeFile = rootProject.file(ksPath)
+                storePassword = signingValue("KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("KEY_PASSWORD", "keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning != null) {
+                signingConfig = releaseSigning
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

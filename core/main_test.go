@@ -62,6 +62,29 @@ func TestPoolManager_RoundRobinAndCooldown(t *testing.T) {
 	}
 }
 
+func TestNormalizeDNSServer(t *testing.T) {
+	cases := map[string]string{
+		"223.5.5.5":       "223.5.5.5:53",
+		" 119.29.29.29 ":  "119.29.29.29:53",
+		"8.8.8.8:5353":    "8.8.8.8:5353",
+		"::1":             "[::1]:53",
+		"":                "",
+		"not-a-dns-entry": "",
+	}
+	for input, want := range cases {
+		got, ok := normalizeDNSServer(input)
+		if want == "" {
+			if ok {
+				t.Fatalf("expected %q to be rejected, got %q", input, got)
+			}
+			continue
+		}
+		if !ok || got != want {
+			t.Fatalf("normalizeDNSServer(%q) = (%q, %v), want %q", input, got, ok, want)
+		}
+	}
+}
+
 func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
 	pool := NewPoolManager("https://agnes-ai.cn", 120)
 	pool.SetKeys([]string{"init-key1"})

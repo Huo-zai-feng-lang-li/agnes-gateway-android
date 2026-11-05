@@ -34,6 +34,7 @@ class GatewayService : Service() {
         const val EXTRA_PORT = "extra_port"
         const val EXTRA_UPSTREAM = "extra_upstream"
         const val EXTRA_KEYS = "extra_keys"
+        const val EXTRA_DNS = "extra_dns"
         const val EXTRA_LOG_LINE = "extra_log_line"
 
         var isRunning: Boolean = false
@@ -58,11 +59,12 @@ class GatewayService : Service() {
         val port = intent?.getIntExtra(EXTRA_PORT, 8080) ?: 8080
         val upstream = intent?.getStringExtra(EXTRA_UPSTREAM) ?: "https://agnes-ai.cn"
         val keys = intent?.getStringExtra(EXTRA_KEYS) ?: ""
+        val dns = intent?.getStringExtra(EXTRA_DNS) ?: ""
 
         startForeground(NOTIFICATION_ID, buildNotification(port))
         isRunning = true
 
-        startGatewayProcess(port, upstream, keys)
+        startGatewayProcess(port, upstream, keys, dns)
         return START_STICKY
     }
 
@@ -139,7 +141,7 @@ class GatewayService : Service() {
         }
     }
 
-    private fun startGatewayProcess(port: Int, upstream: String, keys: String) {
+    private fun startGatewayProcess(port: Int, upstream: String, keys: String, dns: String) {
         thread(isDaemon = true) {
             try {
                 val binaryFile = ensureBinaryReady()
@@ -160,6 +162,9 @@ class GatewayService : Service() {
                         .filter { it.isNotEmpty() }
                         .joinToString(",")
                     cmdList.add("--keys=$formattedKeys")
+                }
+                if (dns.isNotBlank()) {
+                    cmdList.add("--dns=$dns")
                 }
 
                 broadcastLog("[系统] 启动命令: ${cmdList.joinToString(" ")}")
@@ -187,7 +192,7 @@ class GatewayService : Service() {
                     broadcastLog("[守护] 进程异常退出，2秒后尝试自动拉起...")
                     Thread.sleep(2000)
                     if (isRunning) {
-                        startGatewayProcess(port, upstream, keys)
+                        startGatewayProcess(port, upstream, keys, dns)
                         return@thread
                     }
                 }

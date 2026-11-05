@@ -1,7 +1,7 @@
 # Agnes 手机反代网关 (Agnes Gateway for Android)
 
-> 专为解决国内直连 **Cloudflare (CF) / Agnes AI** 接口延迟高、握手慢、频繁断流而设计的安卓独立反代网关。  
-> 利用闲置安卓手机的 **5G/4G 蜂窝网络优质路由** 或家庭宽带，本地聚合 Agnes 号池，对外提供标准 OpenAI 兼容接口。
+> 一个跑在安卓手机上的 **本地局域网反向代理网关**：手机进程内起 HTTP 服务，聚合 Agnes 号池，对外提供标准 OpenAI 兼容接口。  
+> 利用闲置安卓手机的 **5G/4G 蜂窝网络** 或家庭宽带出口，局域网内任何设备（手机里的 Agent、电脑上的客户端）都能直接调用。
 
 ---
 
@@ -11,8 +11,9 @@
 - **号池负载均衡**：支持批量配置多个 Agnes API Key，自动平滑轮询（Round-Robin）。
 - **429 智能退避与自愈**：单个 Key 遭遇 429 限流时自动冷却（默认 120 秒），并**无感重试切换到下一个可用 Key**；遇到 401 自动禁用失效 Key。
 - **锁屏后台持续保活**：基于 Android 原生前台服务（Foreground Service）+ CPU `WakeLock` + `WifiLock`，防止手机熄屏休眠断流。
-- **极速流式透传**：深度定制针对 Cloudflare 的长连接池复用（HTTP Keep-Alive），流式 SSE 逐块实时 flush，杜绝卡顿。
-- **零配置开箱即用**：自动识别手机局域网 IPv4 地址（如 `http://192.168.1.100:8080/v1`），带一键复制功能。
+- **极速流式透传**：上游 HTTP/2 长连接复用（Keep-Alive），流式 SSE 逐块实时 flush，杜绝卡顿。
+- **自动 DNS 适配**：App 读取当前网络的系统 DNS 注入内核，内核自建解析器并并行探测可用 DNS（含国内公共 DNS 兜底），彻底规避安卓子进程 `/etc/resolv.conf` 缺失导致的 `lookup ... :53: connection refused`。
+- **双地址提示**：主 URL 固定为 `http://127.0.0.1:8080/v1`（手机内的 Agent 填这个，换网不用改），另附局域网地址供其他设备使用，均支持一键复制。
 
 ---
 
@@ -33,10 +34,24 @@
    git remote add origin https://github.com/<你的用户名>/<你的仓库名>.git
    git push -u origin main
    ```
-3. **下载 APK 安装包**：
+3. **配置固定签名密钥（首次必须）**：
+
+   CI 产出的 APK 使用仓库 Secrets 中的固定 keystore 签名，保证每次升级都能覆盖安装。首次需在仓库 `Settings → Secrets and variables → Actions` 添加：
+
+   | Secret 名 | 内容 |
+   | --- | --- |
+   | `KEYSTORE_BASE64` | `keystore/agnes-release.p12.b64` 的全部内容 |
+   | `KEYSTORE_PASSWORD` | keystore 密码 |
+   | `KEY_ALIAS` | `agnes-release` |
+   | `KEY_PASSWORD` | key 密码（通常与 keystore 密码一致） |
+
+   > ⚠️ 该 keystore 一旦丢失，后续版本将无法覆盖升级，请务必本地离线备份 `keystore/` 目录。
+   > 早期 v1.0.0 使用 CI 临时 debug 证书，**与固定签名不兼容，需卸载一次旧版再安装**。
+
+4. **下载 APK 安装包**：
    - 打开该 GitHub 仓库的 **Actions** 标签页；
    - 点击刚刚运行的构建任务 `Build Android APK`；
-   - 在页面底部的 **Artifacts** 区域，直接下载打包好的 `AgnesGateway-v1.0.0-APK.zip`，解压即得可以直接安装在手机上的 APK！
+   - 在页面底部的 **Artifacts** 区域，直接下载打包好的 `AgnesGateway-APK.zip`（内含 `AgnesGateway-v1.0.1.apk`），解压即得可直接安装的 APK！
 
 ---
 
@@ -68,20 +83,27 @@
 
 ## 📱 客户端配置与对接指引
 
-当手机上的网关启动后，界面（或日志）会显示局域网 Base URL：
-`http://192.168.x.x:8080/v1`
+网关启动后，界面上会同时给出两个地址：
+
+| 场景 | Base URL |
+| --- | --- |
+| 手机本机内的 Agent / App（换网不变，推荐） | `http://127.0.0.1:8080/v1` |
+| 局域网内其他设备（电脑、另一台手机） | `http://192.168.x.x:8080/v1` |
 
 ### 1. 直连客户端（Cline / Cherry Studio / NextChat 等）
-- **API 接口地址 (Base URL)**: `http://192.168.x.x:8080/v1`
+- **API 接口地址 (Base URL)**: 同机填 `http://127.0.0.1:8080/v1`，跨设备填 `http://192.168.x.x:8080/v1`
 - **API Key**: 随意填写（例如 `123456`，手机网关已负责向 Agnes 注入有效 Key）
 - **模型名**: 直接填 Agnes 支持的模型（如 `gpt-6-astra`, `agnes-2.5-flash` 等）
 
 ### 2. 作为上游接入现有 `codex2api`
 如果你电脑上的 `codex2api` 负责管理全套官方 Codex 账号，你可以把这台手机当成一个**高性能自建聚合上游**：
 - 在 `codex2api` 的系统设置中添加一个账号：
-  - **Base URL**: `http://192.168.x.x:8080/v1`
+  - **Base URL**: `http://192.168.x.x:8080/v1`（与手机同机则可用 `http://127.0.0.1:8080/v1`）
   - **API Key**: `123456`
-- 此时发往 Agnes 的请求将自动通过手机网络路由出海，彻底消除 CF 的网络波动与高延迟。
+- 此时发往 Agnes 的请求将自动通过手机网络出口转发，规避机房 IP 与劣质路由。
+
+### 3. 运行中热更新号池
+网关运行中直接编辑界面的 Key 输入框，再点右上角 **「热更新号池」**，新 Key 立即生效（`POST /_gateway/keys`），无需重启、不中断在途请求。
 
 ---
 
@@ -113,13 +135,17 @@ agnes-gateway-android/
 │   ├── src/main/
 │   │   ├── AndroidManifest.xml     # 前台服务、WakeLock 等权限配置
 │   │   ├── jniLibs/arm64-v8a/
-│   │   │   └── libgateway.so       # 原生执行权限绑定的 Go 核心二进制
+│   │   │   └── libgateway.so       # 原生执行权限绑定的 Go 核心二进制（libgateway.so 实为 Go 可执行文件）
 │   │   ├── java/com/agnes/gateway/
 │   │   │   ├── MainActivity.kt     # 质感 UI、参数持久化、实时滚动日志
 │   │   │   ├── GatewayService.kt   # 前台常驻保活服务、进程守护
 │   │   │   └── NetworkUtils.kt     # 局域网 IP 自动获取
 │   │   └── res/                    # 布局、配色、图标资源
 │   └── ...
+├── keystore/                       # 本地签名密钥（已 gitignore，勿提交）
+│   ├── agnes-release.p12           # PKCS12 固定 release keystore
+│   ├── agnes-release.p12.b64       # 供 GitHub Secret 使用的 base64
+│   └── keystore.properties         # 本地构建读取的签名配置
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── README.md

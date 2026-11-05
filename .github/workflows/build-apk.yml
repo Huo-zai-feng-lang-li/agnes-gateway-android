@@ -41,20 +41,38 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
 
-    - name: Build Android APK
+    - name: Decode Release Keystore
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       run: |
+        if [ -z "$KEYSTORE_BASE64" ]; then
+          echo "缺少 GitHub Secret: KEYSTORE_BASE64"; exit 1
+        fi
+        mkdir -p keystore
+        echo "$KEYSTORE_BASE64" | base64 -d > keystore/agnes-release.p12
+
+    - name: Build Signed Release APK
+      env:
+        KEYSTORE_FILE: keystore/agnes-release.p12
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "缺少签名相关 GitHub Secrets"; exit 1
+        fi
         if [ -f "./gradlew" ] && [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
           chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleRelease --stacktrace
         else
-          gradle assembleDebug --stacktrace
+          gradle assembleRelease --stacktrace
         fi
 
     - name: Rename APK Output
       run: |
         mkdir -p release-apk
         TAG="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}"
-        cp app/build/outputs/apk/debug/app-debug.apk "release-apk/AgnesGateway-${TAG}.apk"
+        cp app/build/outputs/apk/release/app-release.apk "release-apk/AgnesGateway-${TAG}.apk"
         echo "APK build complete: AgnesGateway-${TAG}.apk"
 
     - name: Upload APK Artifact
@@ -72,11 +90,12 @@ jobs:
           ### Agnes 手机反代网关发布 🎉
 
           **更新亮点**：
-          - 增加 `android:extractNativeLibs="true"` 与从 APK 自动自解压核心引擎兜底机制，完美解决在小米 HyperOS / MIUI 及高版本 Android 上找不到 libgateway.so 的问题。
-          - 极速本地反代：局域网直接调用 `http://<手机IP>:8080/v1`。
-          - 多 Key 轮询与 30s 智能退避重试，支持多轮工具调用透传。
-          - 前台保活与自愈：Notification + WakeLock，子进程崩溃看门狗自动拉起。
-          - 运行中热重载：支持免重启热更新 Key 号池。
+          - 修复手机内进程无法解析域名的问题：App 读取系统 DNS 注入内核，内核自建解析器并并行探测可用 DNS，彻底解决 `lookup agnes-ai.cn on [::1]:53: connection refused`。
+          - Base URL 主显示固定为 `http://127.0.0.1:8080/v1`，换网络无需改配置；局域网地址单独提示。
+          - 实时日志支持滚动并自动跟随到最新一行。
+          - 界面文案修正为「本地号池负载均衡 · 局域网极速反向代理」，并补充热更新号池使用说明。
+          - 接入固定 release 签名，后续版本可直接覆盖升级。
+          - 多 Key 轮询与 30s 智能退避重试，支持多轮工具调用透传；前台保活与看门狗自愈；运行中热更新号池。
         files: release-apk/*.apk
         draft: false
         prerelease: false

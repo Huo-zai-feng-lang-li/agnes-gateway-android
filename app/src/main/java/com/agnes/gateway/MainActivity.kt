@@ -7,11 +7,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.method.ScrollingMovementMethod
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -23,6 +25,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var tvLocalUrl: TextView
+    private lateinit var tvLanUrl: TextView
     private lateinit var btnCopyUrl: Button
     private lateinit var etUpstream: EditText
     private lateinit var etPort: EditText
@@ -34,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnClearLog: Button
 
     private val logStringBuilder = StringBuilder()
+    private var currentBaseUrl: String = ""
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -76,6 +80,7 @@ class MainActivity : AppCompatActivity() {
     private fun initViews() {
         tvStatus = findViewById(R.id.tvStatus)
         tvLocalUrl = findViewById(R.id.tvLocalUrl)
+        tvLanUrl = findViewById(R.id.tvLanUrl)
         btnCopyUrl = findViewById(R.id.btnCopyUrl)
         etUpstream = findViewById(R.id.etUpstream)
         etPort = findViewById(R.id.etPort)
@@ -84,15 +89,18 @@ class MainActivity : AppCompatActivity() {
         btnToggle = findViewById(R.id.btnToggle)
         btnBatteryOpt = findViewById(R.id.btnBatteryOpt)
         tvLogs = findViewById(R.id.tvLogs)
+        tvLogs.movementMethod = ScrollingMovementMethod()
         btnClearLog = findViewById(R.id.btnClearLog)
 
         btnCopyUrl.setOnClickListener {
-            val url = tvLocalUrl.text.toString()
-            if (url.isNotBlank() && url != "未启动") {
+            val url = currentBaseUrl
+            if (url.isNotBlank()) {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("Agnes Gateway URL", url)
                 clipboard.setPrimaryClip(clip)
                 Toast.makeText(this, "已复制 Base URL 到剪贴板", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "网关未启动", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -158,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         val port = portStr.toIntOrNull() ?: 8080
         val upstream = etUpstream.text.toString().trim().ifEmpty { "https://agnes-ai.cn" }
         val keys = etKeys.text.toString().trim()
+        val dns = getSystemDnsServers()
 
         if (keys.isEmpty()) {
             Toast.makeText(this, "提示: 当前未配置 Agnes Key，请先输入 Key 号池", Toast.LENGTH_LONG).show()
@@ -168,6 +177,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(GatewayService.EXTRA_PORT, port)
             putExtra(GatewayService.EXTRA_UPSTREAM, upstream)
             putExtra(GatewayService.EXTRA_KEYS, keys)
+            putExtra(GatewayService.EXTRA_DNS, dns)
         }
         ContextCompat.startForegroundService(this, intent)
 
@@ -198,8 +208,9 @@ class MainActivity : AppCompatActivity() {
             etUpstream.isEnabled = false
             btnReloadKeys.visibility = android.view.View.VISIBLE
 
-            val fullUrl = if (localIP != null) "http://$localIP:$port/v1" else "http://127.0.0.1:$port/v1"
-            tvLocalUrl.text = fullUrl
+            currentBaseUrl = "http://127.0.0.1:$port/v1"
+            tvLocalUrl.text = currentBaseUrl
+            tvLanUrl.text = if (localIP != null) "局域网其他设备用: http://$localIP:$port/v1" else "未检测到局域网 IP"
             btnCopyUrl.isEnabled = true
         } else {
             tvStatus.text = "○ 已停止 (Stopped)"
@@ -210,7 +221,9 @@ class MainActivity : AppCompatActivity() {
             etUpstream.isEnabled = true
             btnReloadKeys.visibility = android.view.View.GONE
 
-            tvLocalUrl.text = if (localIP != null) "http://$localIP:$port/v1 (未启动)" else "未启动"
+            currentBaseUrl = ""
+            tvLocalUrl.text = "http://127.0.0.1:$port/v1 (未启动)"
+            tvLanUrl.text = if (localIP != null) "局域网其他设备用: http://$localIP:$port/v1" else ""
             btnCopyUrl.isEnabled = false
         }
     }
@@ -222,6 +235,11 @@ class MainActivity : AppCompatActivity() {
                 logStringBuilder.delete(0, 5000)
             }
             tvLogs.text = logStringBuilder.toString()
+            tvLogs.post {
+                val layout = tvLogs.layout ?: return@post
+                val bottom = layout.getLineTop(tvLogs.lineCount)
+                tvLogs.scrollTo(0, (bottom - tvLogs.height).coerceAtLeast(0))
+            }
         }
     }
 
@@ -244,6 +262,24 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {
             Toast.makeText(this, "请在系统设置中允许本应用在后台常驻运行", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 读取当前活动网络的 DNS 服务器 IP（过滤回环与链路本地地址），
+     * 供内核进程绕过 Android 残缺的 /etc/resolv.conf 使用。
+     */
+    private fun getSystemDnsServers(): String {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return ""
+            val props = cm.getLinkProperties(network) ?: return ""
+            props.dnsServers
+                .mapNotNull { it.hostAddress }
+                .filter { it.isNotBlank() && !it.startsWith("fe80") && it != "::1" && it != "127.0.0.1" }
+                .joinToString(",")
+        } catch (_: Exception) {
+            ""
         }
     }
 

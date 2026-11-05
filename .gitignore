@@ -10,4 +10,6 @@
 local.properties
 app/build/
 release-apk/
+release-apk-v101/
 core/test_gateway.exe
+/keystore/

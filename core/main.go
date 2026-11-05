@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -166,6 +167,84 @@ func (p *PoolManager) Snapshot() ([]KeyState, string) {
 	return list, p.upstreamURL
 }
 
+// customResolver 供上游 http.Transport 复用；nil 表示使用系统默认解析器
+var customResolver *net.Resolver
+
+// normalizeDNSServer 将裸 IP / host:port 归一化成 host:port 形式
+func normalizeDNSServer(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	if net.ParseIP(raw) != nil {
+		return net.JoinHostPort(raw, "53"), true
+	}
+	if host, port, err := net.SplitHostPort(raw); err == nil && host != "" && port != "" {
+		return raw, true
+	}
+	return "", false
+}
+
+// newResolver 构造基于指定 DNS 服务器的纯 Go 解析器
+func newResolver(servers []string) *net.Resolver {
+	if len(servers) == 0 {
+		return nil
+	}
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: 3 * time.Second}
+			var lastErr error
+			for _, server := range servers {
+				conn, err := dialer.DialContext(ctx, network, server)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr == nil {
+				lastErr = fmt.Errorf("no dns server available")
+			}
+			return nil, lastErr
+		},
+	}
+}
+
+// probeDNSServers 并行探测候选 DNS 服务器是否可用，按原顺序返回可用项
+func probeDNSServers(servers []string, host string) []string {
+	if len(servers) == 0 || host == "" || net.ParseIP(host) != nil {
+		return servers
+	}
+	type probeResult struct {
+		idx int
+		ok  bool
+	}
+	ch := make(chan probeResult, len(servers))
+	for i, server := range servers {
+		go func(i int, server string) {
+			r := newResolver([]string{server})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, err := r.LookupHost(ctx, host)
+			ch <- probeResult{idx: i, ok: err == nil}
+		}(i, server)
+	}
+	okSet := make(map[int]bool, len(servers))
+	for range servers {
+		r := <-ch
+		if r.ok {
+			okSet[r.idx] = true
+		}
+	}
+	var ordered []string
+	for i, server := range servers {
+		if okSet[i] {
+			ordered = append(ordered, server)
+		}
+	}
+	return ordered
+}
+
 // GatewayServer 反代网关
 type GatewayServer struct {
 	pool       *PoolManager
@@ -178,12 +257,13 @@ func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServe
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	// 深度定制针对 Cloudflare 的长连接连接池
+	// 上游长连接复用池（HTTP/2 + Keep-Alive + 自定义 DNS 解析）
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
+			Resolver:  customResolver,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -467,6 +547,7 @@ func main() {
 	cooldown := flag.Int("cooldown", 120, "429 冷却时长(秒)")
 	retries := flag.Int("retries", 3, "故障自动重试次数")
 	keysFile := flag.String("keys-file", "", "包含 Key 列表的文件(一行一个)")
+	dnsFlag := flag.String("dns", "", "逗号分隔的 DNS 服务器(如 223.5.5.5,119.29.29.29)")
 	keysFlag := flag.String("keys", "", "逗号分隔的 Key 列表")
 	flag.Parse()
 
@@ -477,6 +558,37 @@ func main() {
 	log.Printf("上游地址: %s", *upstream)
 	log.Printf("监听端口: %d", *port)
 	log.Printf("冷却退避: %d 秒", *cooldown)
+
+	// 装配 DNS：优先使用 App 传入的系统 DNS，其次国内公共 DNS 兜底
+	var dnsServers []string
+	seenDNS := make(map[string]bool)
+	appendDNS := func(raw string) {
+		if s, ok := normalizeDNSServer(raw); ok && !seenDNS[s] {
+			seenDNS[s] = true
+			dnsServers = append(dnsServers, s)
+		}
+	}
+	if *dnsFlag != "" {
+		for _, raw := range strings.Split(*dnsFlag, ",") {
+			appendDNS(raw)
+		}
+	}
+	for _, raw := range []string{"223.5.5.5", "119.29.29.29", "114.114.114.114", "8.8.8.8"} {
+		appendDNS(raw)
+	}
+
+	upstreamHost := ""
+	if u, err := url.Parse(*upstream); err == nil {
+		upstreamHost = u.Hostname()
+	}
+	usableDNS := probeDNSServers(dnsServers, upstreamHost)
+	if len(usableDNS) == 0 {
+		log.Printf("[DNS] 候选 DNS 均探测失败，按默认顺序尝试: %s", strings.Join(dnsServers, ", "))
+		usableDNS = dnsServers
+	} else {
+		log.Printf("[DNS] 可用 DNS 服务器: %s", strings.Join(usableDNS, ", "))
+	}
+	customResolver = newResolver(usableDNS)
 
 	pool := NewPoolManager(*upstream, *cooldown)
 
