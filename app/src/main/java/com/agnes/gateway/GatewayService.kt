@@ -89,18 +89,64 @@ class GatewayService : Service() {
         }
     }
 
+    private fun ensureBinaryReady(): File? {
+        val targetBinary = File(filesDir, "libgateway")
+        val nativeLibDir = applicationInfo.nativeLibraryDir
+        val sysBinary = File(nativeLibDir, "libgateway.so")
+
+        // 1. 若系统成功解压到 nativeLibraryDir，直接优先使用
+        if (sysBinary.exists() && sysBinary.length() > 0) {
+            sysBinary.setExecutable(true, false)
+            broadcastLog("[系统] 定位到系统原生库: ${sysBinary.absolutePath}")
+            return sysBinary
+        }
+
+        // 2. 若 filesDir 中已存在且完整，直接复用
+        if (targetBinary.exists() && targetBinary.length() > 1024 * 1024) {
+            targetBinary.setExecutable(true, false)
+            targetBinary.setReadable(true, false)
+            broadcastLog("[系统] 定位到已释放核心: ${targetBinary.absolutePath}")
+            return targetBinary
+        }
+
+        // 3. 从 APK 包中自解压 lib/arm64-v8a/libgateway.so 到 filesDir
+        broadcastLog("[系统] 系统未解压 native 库，正在从 APK 提取核心引擎...")
+        try {
+            val apkFile = File(applicationInfo.sourceDir)
+            java.util.zip.ZipFile(apkFile).use { zip ->
+                val entry = zip.getEntry("lib/arm64-v8a/libgateway.so")
+                    ?: zip.entries().asSequence().firstOrNull { it.name.endsWith("libgateway.so") }
+
+                if (entry == null) {
+                    broadcastLog("[错误] APK 中未检索到 libgateway.so！")
+                    return null
+                }
+
+                zip.getInputStream(entry).use { input ->
+                    targetBinary.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            targetBinary.setExecutable(true, false)
+            targetBinary.setReadable(true, false)
+            broadcastLog("[系统] 核心引擎自解压成功: ${targetBinary.length() / 1024} KB")
+            return targetBinary
+        } catch (e: Exception) {
+            broadcastLog("[错误] 从 APK 提取核心失败: ${e.message}")
+            return null
+        }
+    }
+
     private fun startGatewayProcess(port: Int, upstream: String, keys: String) {
         thread(isDaemon = true) {
             try {
-                val nativeLibDir = applicationInfo.nativeLibraryDir
-                val binaryFile = File(nativeLibDir, "libgateway.so")
-
-                broadcastLog("[系统] 正在定位核心二进制: ${binaryFile.absolutePath}")
-                if (!binaryFile.exists()) {
-                    broadcastLog("[错误] 未找到核心二进制 libgateway.so，请确认安装包完整性！")
+                val binaryFile = ensureBinaryReady()
+                if (binaryFile == null || !binaryFile.exists()) {
+                    broadcastLog("[错误] 核心引擎定位失败，请检查安装包完整性！")
                     return@thread
                 }
-                binaryFile.setExecutable(true, false)
 
                 val cmdList = mutableListOf(
                     binaryFile.absolutePath,

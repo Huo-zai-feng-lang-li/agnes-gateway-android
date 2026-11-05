@@ -53,32 +53,31 @@ jobs:
     - name: Rename APK Output
       run: |
         mkdir -p release-apk
-        cp app/build/outputs/apk/debug/app-debug.apk release-apk/AgnesGateway-v1.0.0.apk
-        echo "APK build complete: AgnesGateway-v1.0.0.apk"
+        TAG="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}"
+        cp app/build/outputs/apk/debug/app-debug.apk "release-apk/AgnesGateway-${TAG}.apk"
+        echo "APK build complete: AgnesGateway-${TAG}.apk"
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AgnesGateway-v1.0.0-APK
-        path: release-apk/AgnesGateway-v1.0.0.apk
+        name: AgnesGateway-APK
+        path: release-apk/*.apk
 
     - name: Create or Update GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.0.0
-        name: "Agnes 手机反代网关 v1.0.0"
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}
+        name: "Agnes 手机反代网关 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}"
         body: |
-          ### Agnes 手机反代网关 v1.0.0 🎉
+          ### Agnes 手机反代网关发布 🎉
 
-          **核心特性**：
-          - **极速反代**：局域网直接调用手机网关 `http://<手机IP>:8080/v1`，消除中转开销。
-          - **多 Key 轮询负载均衡**：自动轮询，429 智能敏捷退避（30s），故障自动转移。
-          - **前台保活与自愈**：Notification + WakeLock，子进程崩溃看门狗自动拉起。
-          - **运行中热重载**：支持免重启热更新 Key 号池。
-
-          **安装说明**：
-          直接下载下方的 `AgnesGateway-v1.0.0.apk` 安装到 Android 手机即可！
-        files: release-apk/AgnesGateway-v1.0.0.apk
+          **更新亮点**：
+          - 增加 `android:extractNativeLibs="true"` 与从 APK 自动自解压核心引擎兜底机制，完美解决在小米 HyperOS / MIUI 及高版本 Android 上找不到 libgateway.so 的问题。
+          - 极速本地反代：局域网直接调用 `http://<手机IP>:8080/v1`。
+          - 多 Key 轮询与 30s 智能退避重试，支持多轮工具调用透传。
+          - 前台保活与自愈：Notification + WakeLock，子进程崩溃看门狗自动拉起。
+          - 运行中热重载：支持免重启热更新 Key 号池。
+        files: release-apk/*.apk
         draft: false
         prerelease: false
       env:
