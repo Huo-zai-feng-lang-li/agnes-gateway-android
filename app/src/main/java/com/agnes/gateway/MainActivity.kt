@@ -1,12 +1,15 @@
 package com.agnes.gateway
 
 import android.annotation.SuppressLint
+import android.app.Dialog
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
+import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
@@ -15,9 +18,16 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.Gravity
+import android.view.ViewGroup
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -42,8 +52,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvLogs: TextView
     private lateinit var btnClearLog: Button
 
-    private val logStringBuilder = StringBuilder()
+    private val logStringBuilder = SpannableStringBuilder()
     private var currentBaseUrl: String = ""
+    private var fullscreenLogDialog: Dialog? = null
+    private var fullscreenTvLogs: TextView? = null
 
     // 日志滚动保留上限：条数与时间双限，避免无界增长
     private val logLines = ArrayDeque<Pair<Long, String>>()
@@ -179,6 +191,23 @@ class MainActivity : AppCompatActivity() {
         btnBatteryOpt = findViewById(R.id.btnBatteryOpt)
         tvLogs = findViewById(R.id.tvLogs)
         tvLogs.movementMethod = ScrollingMovementMethod()
+        // 阻止外层 ScrollView 抢走触摸事件，让日志框能够独立上下滑动
+        tvLogs.setOnTouchListener { v, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    autoScrollEnabled = isNearBottom()
+                }
+                android.view.MotionEvent.ACTION_UP,
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            false
+        }
+        tvLogs.setOnClickListener {
+            toggleFullscreenLog()
+        }
         tvLogs.setOnScrollChangeListener { _, _, _, _, _ ->
             // 仅当用户停留在底部附近时保持自动跟随，手动上翻后不再拽回
             autoScrollEnabled = isNearBottom()
@@ -218,6 +247,7 @@ class MainActivity : AppCompatActivity() {
             logStringBuilder.clear()
             logLines.clear()
             tvLogs.text = ""
+            fullscreenTvLogs?.text = ""
             autoScrollEnabled = true
         }
     }
@@ -330,19 +360,41 @@ class MainActivity : AppCompatActivity() {
             logLines.addLast(now to msg)
 
             // 裁剪可能导致前缀变化，此时需整体重建一次；否则走增量追加
-            if (pruneLogs(now)) {
+            val pruned = pruneLogs(now)
+
+            if (pruned) {
                 rebuildLogView()
             } else {
                 if (logStringBuilder.isNotEmpty()) {
                     logStringBuilder.append('\n')
                     tvLogs.append("\n")
                 }
-                logStringBuilder.append(msg)
-                tvLogs.append(msg)
+                val colored = colorizeLog(msg)
+                logStringBuilder.append(colored)
+                tvLogs.append(colored)
             }
 
             if (autoScrollEnabled) {
                 tvLogs.post { scrollToBottom() }
+            }
+
+            // 全屏查看中：同步刷新全屏视图内容（同样走增量追加，避免全量重建卡顿）
+            fullscreenTvLogs?.let { fsTv ->
+                if (pruned) {
+                    fsTv.text = SpannableStringBuilder(logStringBuilder)
+                } else {
+                    if (fsTv.text.isNotEmpty()) {
+                        fsTv.append("\n")
+                    }
+                    fsTv.append(colorizeLog(msg))
+                }
+                if (autoScrollEnabled) {
+                    fsTv.post {
+                        val layout = fsTv.layout ?: return@post
+                        val bottom = layout.getLineTop(fsTv.lineCount)
+                        fsTv.scrollTo(0, (bottom - fsTv.height).coerceAtLeast(0))
+                    }
+                }
             }
         }
     }
@@ -364,8 +416,30 @@ class MainActivity : AppCompatActivity() {
     // 全量重建日志文本（仅裁剪时触发，频率低）
     private fun rebuildLogView() {
         logStringBuilder.clear()
-        logStringBuilder.append(logLines.joinToString("\n") { it.second })
-        tvLogs.text = logStringBuilder.toString()
+        logLines.forEachIndexed { index, (_, msg) ->
+            if (index > 0) logStringBuilder.append('\n')
+            logStringBuilder.append(colorizeLog(msg))
+        }
+        // 必须传副本：若直接传 logStringBuilder，TextView.mText 会持有同一实例，
+        // 后续 logStringBuilder.append() 与 tvLogs.append() 会各追加一次造成重复
+        tvLogs.text = SpannableStringBuilder(logStringBuilder)
+    }
+
+    // 根据日志前缀进行分色，提升可读性与对比度
+    private fun colorizeLog(msg: String): Spannable {
+        val sp = SpannableStringBuilder(msg)
+        val color = when {
+            msg.startsWith("[200]") || msg.startsWith("[201]") -> 0xFF3FB950.toInt() // 成功绿
+            msg.startsWith("[400]") || msg.startsWith("[401]") || msg.startsWith("[403]") ||
+            msg.startsWith("[429]") || msg.startsWith("[500]") || msg.startsWith("[502]") ||
+            msg.startsWith("[转发失败]") || msg.startsWith("[错误]") -> 0xFFF85149.toInt() // 错误红
+            msg.startsWith("[系统]") || msg.startsWith("[DNS]") -> 0xFF58A6FF.toInt() // 系统蓝
+            msg.startsWith("[号池]") || msg.startsWith("[守护]") -> 0xFFD2A8FF.toInt() // 号池紫
+            msg.startsWith("===") -> 0xFF8B949E.toInt() // 分隔线灰
+            else -> 0xFFE6EDF3.toInt() // 普通白
+        }
+        sp.setSpan(ForegroundColorSpan(color), 0, msg.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return sp
     }
 
     private fun isNearBottom(): Boolean {
@@ -380,6 +454,85 @@ class MainActivity : AppCompatActivity() {
         val bottom = layout.getLineTop(tvLogs.lineCount)
         tvLogs.scrollTo(0, (bottom - tvLogs.height).coerceAtLeast(0))
         autoScrollEnabled = true
+    }
+
+    override fun onBackPressed() {
+        if (fullscreenLogDialog?.isShowing == true) {
+            fullscreenLogDialog?.dismiss()
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
+    }
+
+    // 横屏全屏查看日志
+    private fun toggleFullscreenLog() {
+        if (fullscreenLogDialog?.isShowing == true) {
+            fullscreenLogDialog?.dismiss()
+            return
+        }
+
+        // 强制横屏
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0D1117.toInt())
+            setPadding(16, 16, 16, 16)
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 8)
+        }
+
+        val title = TextView(this).apply {
+            text = "实时运行日志 (全屏)"
+            setTextColor(0xFFE6EDF3.toInt())
+            textSize = 16f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val btnClose = Button(this).apply {
+            text = "退出全屏"
+            setOnClickListener { dialog.dismiss() }
+        }
+
+        val tv = TextView(this).apply {
+            setBackgroundColor(0xFF0D1117.toInt())
+            setTextColor(0xFFE6EDF3.toInt())
+            typeface = Typeface.MONOSPACE
+            textSize = 13f
+            setPadding(8, 8, 8, 8)
+            movementMethod = ScrollingMovementMethod()
+            setTextIsSelectable(true) // 允许复制
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        fullscreenTvLogs = tv
+        tv.text = SpannableStringBuilder(logStringBuilder)
+
+        tv.post {
+            val layout = tv.layout ?: return@post
+            val bottom = layout.getLineTop(tv.lineCount)
+            tv.scrollTo(0, (bottom - tv.height).coerceAtLeast(0))
+        }
+
+        header.addView(title)
+        header.addView(btnClose)
+        root.addView(header)
+        root.addView(tv)
+
+        dialog.setContentView(root)
+        dialog.setOnDismissListener {
+            fullscreenLogDialog = null
+            fullscreenTvLogs = null
+            // 恢复屏幕方向
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        dialog.show()
+        fullscreenLogDialog = dialog
     }
 
     private fun requestNotificationPermission() {
