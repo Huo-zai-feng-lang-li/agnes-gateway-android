@@ -69,8 +69,18 @@
     - **并发与架构安全**：经无状态子代理独立审查，使用 `atomic.Pointer[string]` 彻底消除 `lastUsedKey` 的 Data Race，升级 `compareVersion` 稳健过滤非数字后缀，重新编译 ARM64 架构二进制并校验通过。
     - 版本号遵循**跳过数字 4** 规则，版本递增至 **versionCode 9 / versionName 1.0.8**。
 
+29. **v1.0.9：丝滑响应专项（首字延迟 + 切号）**
+    - **并发竞速拨号**：`dialIPsFallback` 由串行改为 Happy Eyeballs 并发（IPv4 优先、每 50ms 错峰、首个连通即用并取消其余），单 IP 超时 3s→800ms。消除首 IP 黑洞导致的最坏 12s 串行等待。
+    - **全冷却快速失败**：`PickNext` 全冷却时返回 (nil, total)，`forwardRequest` 区分 503 `gateway_pool_cooldown`（带 Retry-After: 30）与 `gateway_pool_empty`，不再白撞一次上游。
+    - **明文 Key 泄露修复（实测发现）**：`/_gateway/status` 原本返回完整明文 Key，`KeyState.Key` 的 json tag 改为 `-`。
+    - **客户端断开不冷却**：`reqErr` 为 `context.Canceled`/`DeadlineExceeded` 时记 `[中断]` 日志直接返回，避免连环冷却整池（本轮 503 语义会放大该问题）。
+    - **DisplayName 竞争修复**：新增 `displayNameOf()` 锁内取快照，冷却/失败/成功三处日志改用它；`MarkCooldown` 锁外读改为锁内取副本。
+    - 新增测试 6 个：全冷却返回 nil、空池 (nil,0)、并发拨号绕过黑洞、热更新并发无竞争、status 无明文 Key、客户端断开不冷却。
+    - 真实端到端实测（3 个真实 Key）：流式 TTFB 0.34~0.70s；`/_gateway/status` 无明文 Key；Key 轮询均匀。
+    - 版本递增至 **versionCode 10 / versionName 1.0.9**。
+
 ## 未完成 / 下一步
-- 无待办。当前最新版本 v1.0.8。
+- 无待办。当前最新版本 v1.0.9。
 - 后续发版按 .agents/rules/README.md 流程执行（版本号禁含 4）。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
@@ -86,7 +96,7 @@
 
 ## 佐证
 - go test ./... → ok agnes-gateway-core；go vet ./... 无输出。
-- core/agnes-gateway-arm64 与 app/src/main/jniLibs/arm64-v8a/libgateway.so SHA256 一致：05DF751D885B9CDBD36030311ED7E5D4D6EE55B93951829BA4D6276E2FAF3B8A。
+- core/agnes-gateway-arm64 与 app/src/main/jniLibs/arm64-v8a/libgateway.so SHA256 一致：3BBA7B85A42ED218A917E3C3E0A976FCB00800E8D6FED62144AEBA3C0C0B1971（v1.0.9 并发拨号版）。
 - 二进制与暂存区源码一致性复核：用暂存区 main.go 重编得 05df751d…，与提交的 agnes-gateway-arm64 / libgateway.so 一致（此前 A03F82… 是含未提交加固代码的版本，已重编对齐）。
 - 对抗性审计闭环（.agents/v1.0.8面板与性能重构-审计.md）：通过 Happy Eyeballs IPv4 优先、401 封禁全量告警兜底、banned_key_list 黑名单精准比对、后台独立通知监听，裁决为 PASS。
 - workflow YAML 校验通过。

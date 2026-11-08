@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.9] - 2026-11-08
+
+### 性能与优化
+- **并发竞速拨号（Happy Eyeballs）**：候选 IP 由串行逐个尝试改为并发竞速——IPv4 优先，首个 IP 立即拨号，后续每 50ms 错峰启动，谁先连通即用谁并取消其余；单 IP 超时由 3s 降至 800ms。彻底消除「首个 IP 是不可达黑洞时串行等待满超时」带来的额外首字延迟（最坏 12s → 约 1s）。
+- **号池全冷却快速失败**：所有 Key 均处于冷却时，不再挑一个冷却中的 Key 去撞上游白等一次往返，而是立即返回 `503 gateway_pool_cooldown` 并附 `Retry-After: 30`；空池单独返回 `gateway_pool_empty`，便于客户端区分。
+
+### 修复
+- **管理接口明文 Key 泄露**：`/_gateway/status` 此前会返回完整明文 API Key，现统一置为不参与 JSON 序列化，仅保留 `masked_key` / `display_name`。
+- **客户端断开误伤号池**：客户端主动断开或超时导致上下文取消时，不再把 Key 打入 30 秒冷却（此前会连环冷却整池），改为记录 `[中断]` 日志后直接返回。
+- **日志读取 Key 备注名的数据竞争**：冷却、失败、成功三处日志改为在锁内取展示名快照，消除与热更新号池并发写入的竞争。
+
 ## [v1.0.8] - 2026-11-06
 
 ### 新增
@@ -133,6 +144,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.9]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.6

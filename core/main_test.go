@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -203,7 +204,11 @@ func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
 		AvailableKeys int    `json:"available_keys"`
 		LastUsedKey   string `json:"last_used_key"`
 	}
-	json.NewDecoder(rr.Body).Decode(&statusResp)
+	bodyBytes := rr.Body.Bytes()
+	if bytes.Contains(bodyBytes, []byte("init-key1")) {
+		t.Fatalf("management API must not leak plaintext key, got: %s", bodyBytes)
+	}
+	json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&statusResp)
 	if statusResp.TotalKeys != 1 || statusResp.AvailableKeys != 1 {
 		t.Fatalf("expected 1 total & available key, got %v", statusResp)
 	}
@@ -223,6 +228,159 @@ func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
 	list, _, _, _, _, _ := pool.Snapshot()
 	if len(list) != 3 {
 		t.Fatalf("expected 3 keys after hot-reload, got %d", len(list))
+	}
+}
+
+// 全部 Key 处于冷却时必须立即返回 nil（由上层快速 503），不得再挑一个冷却中的 Key 去撞上游
+func TestPoolManager_AllCoolingReturnsNil(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
+	pool.SetKeys([]string{"k1", "k2"})
+
+	k1, _ := pool.PickNext()
+	k2, _ := pool.PickNext()
+	pool.MarkCooldown(k1, "429", 1*time.Minute)
+	pool.MarkCooldown(k2, "429", 1*time.Minute)
+
+	got, total := pool.PickNext()
+	if got != nil {
+		t.Fatalf("expected nil when all keys cooling, got %s", got.DisplayName)
+	}
+	if total != 2 {
+		t.Fatalf("expected total=2 to distinguish from empty pool, got %d", total)
+	}
+
+	// 冷却到期后必须重新可用
+	time.Sleep(60 * time.Millisecond)
+	pool.mu.Lock()
+	for _, ks := range pool.keys {
+		ks.CooldownTill = time.Now().Add(-time.Second)
+	}
+	pool.mu.Unlock()
+	if again, _ := pool.PickNext(); again == nil {
+		t.Fatalf("expected key available after cooldown expiry")
+	}
+}
+
+// 空池必须返回 (nil, 0)，与「全冷却」(nil, total>0) 区分
+func TestPoolManager_EmptyPoolReturnsZeroTotal(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
+	pool.SetKeys(nil)
+	ks, total := pool.PickNext()
+	if ks != nil || total != 0 {
+		t.Fatalf("expected (nil,0) for empty pool, got (%v,%d)", ks, total)
+	}
+}
+
+// 并发拨号：首个 IP 为黑洞时，必须由后续 IP 快速胜出，而非串行等到首 IP 超时
+func TestDialIPsFallback_RacesPastBlackhole(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, e := ln.Accept()
+			if e != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+
+	// 10.255.255.1 为典型黑洞地址（SYN 无响应），排在 v4 首位
+	ips := []net.IP{net.ParseIP("10.255.255.1"), net.ParseIP("127.0.0.1")}
+	d := &net.Dialer{Timeout: 800 * time.Millisecond}
+
+	start := time.Now()
+	conn, err := dialIPsFallback(context.Background(), d, "tcp", ips, port)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("expected race to succeed via 127.0.0.1, got %v", err)
+	}
+	conn.Close()
+
+	// 串行实现需等首 IP 满 800ms 超时；并发应远小于该值
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("dial too slow (%v), race likely not concurrent", elapsed)
+	}
+}
+
+// 热更新号池与 PickNext 并发时不得触发数据竞争（go test -race 下验证）
+func TestPoolManager_HotReloadConcurrentWithPick(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
+	pool.SetKeys([]string{"a1#一号", "a2#二号"})
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				pool.SetKeys([]string{"a1#一号改名", "a2#二号", "a3#三号"})
+			}
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		ks, _ := pool.PickNext()
+		if ks != nil {
+			_ = ks.DisplayName
+		}
+		pool.Snapshot()
+	}
+	close(stop)
+	wg.Wait()
+}
+
+// 客户端主动断开（ctx 取消）不得把 Key 打入冷却，否则会误伤整个号池
+func TestForwardRequest_ClientCancelDoesNotCooldown(t *testing.T) {
+	// release 用于在测试收尾时释放卡住的 handler，避免 httptest.Server.Close 死等
+	release := make(chan struct{})
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer func() {
+		close(release)
+		upstreamMock.Close()
+	}()
+
+	pool := NewPoolManager(upstreamMock.URL, 60)
+	pool.SetKeys([]string{"k1#主力", "k2#备用"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"m"}`)).WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.ServeHTTP(rr, req)
+		close(done)
+	}()
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("handler did not return after client cancel")
+	}
+
+	// 两个 Key 都必须仍可用（未进入冷却）
+	_, _, _, available, cooldown, _ := pool.Snapshot()
+	if cooldown != 0 {
+		t.Fatalf("client cancel must not cooldown keys, got cooldown=%d", cooldown)
+	}
+	if available != 2 {
+		t.Fatalf("expected 2 available keys after client cancel, got %d", available)
 	}
 }
 

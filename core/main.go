@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,7 +46,8 @@ func formatLogTime() string {
 
 // KeyState 记录单个 Key 的运行时健康状态
 type KeyState struct {
-	Key          string    `json:"key"`
+	// Key 为上游明文凭证，禁止出现在任何 JSON 输出中（管理接口虽限本机回环，仍不应出网）
+	Key          string    `json:"-"`
 	Alias        string    `json:"alias"`
 	MaskedKey    string    `json:"masked_key"`
 	DisplayName  string    `json:"display_name"`
@@ -222,21 +224,15 @@ func (p *PoolManager) PickNext() (*KeyState, int) {
 		if now.Before(ks.CooldownTill) {
 			continue
 		}
-		p.lastUsedKey.Store(&ks.DisplayName)
+		disp := ks.DisplayName
+		p.lastUsedKey.Store(&disp)
 		return ks, total
 	}
 
-	// 若所有 Key 都在冷却中，挑选最早解冻的那一个（仅作为重试候选，不记录为当前活跃 Key）
-	var earliest *KeyState
-	for _, ks := range p.keys {
-		if ks.Disabled {
-			continue
-		}
-		if earliest == nil || ks.CooldownTill.Before(earliest.CooldownTill) {
-			earliest = ks
-		}
-	}
-	return earliest, total
+	// 所有 Key 均处于冷却/禁用状态：直接返回 nil，由上层快速 503，
+	// 避免再挑一个冷却中的 Key 白白发起一次注定失败的上游请求（几百 ms ~ 3s）。
+	// total 保持原值，供调用方区分「空池」(total=0) 与「全冷却」(total>0)。
+	return nil, total
 }
 
 func (p *PoolManager) MarkSuccess(ks *KeyState) {
@@ -267,11 +263,19 @@ func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time
 	ks.CooldownTill = time.Now().Add(duration)
 	ks.LastError = errReason
 	dead := p.allUnavailableLocked(time.Now())
+	disp := ks.DisplayName
 	p.mu.Unlock()
-	log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), ks.DisplayName, duration)
+	log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
 	if dead {
 		logAllUnavailable()
 	}
+}
+
+// displayNameOf 在锁保护下读取 Key 展示名，避免与 SetKeys 并发写入构成数据竞争
+func (p *PoolManager) displayNameOf(ks *KeyState) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return ks.DisplayName
 }
 
 // RemoveKey 检测到 401 封禁时从号池中物理剔除该 Key，并记入封禁黑名单
@@ -452,24 +456,61 @@ func orderIPsV4First(ips []net.IP) []net.IP {
 	return out
 }
 
-// dialIPsFallback 依次尝试候选 IP（IPv4 优先），首个成功即返回
+// dialIPsFallback 并发竞速拨号（Happy Eyeballs 变体）：IPv4 优先，首个立即拨号，
+// 后续每 50ms 错峰启动，谁先连通就用谁，其余立即取消。
+// 消除「首个 IP 是黑洞时串行等待满超时」导致的额外首字延迟。
 func dialIPsFallback(ctx context.Context, d *net.Dialer, network string, ips []net.IP, port string) (net.Conn, error) {
+	ordered := orderIPsV4First(ips)
+	if len(ordered) > maxDialIPs {
+		ordered = ordered[:maxDialIPs]
+	}
+	if len(ordered) == 0 {
+		return nil, fmt.Errorf("no candidate ip to dial")
+	}
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	raceCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	ch := make(chan dialResult, len(ordered))
+	for i, ip := range ordered {
+		go func(idx int, ip net.IP) {
+			// 错峰启动：首个立即拨号，后续每档 +50ms，避免同时打爆对端并保证 v4 优先
+			if idx > 0 {
+				select {
+				case <-time.After(time.Duration(idx) * 50 * time.Millisecond):
+				case <-raceCtx.Done():
+					ch <- dialResult{err: raceCtx.Err()}
+					return
+				}
+			}
+			conn, err := d.DialContext(raceCtx, network, net.JoinHostPort(ip.String(), port))
+			if err != nil {
+				ch <- dialResult{err: err}
+				return
+			}
+			ch <- dialResult{conn: conn}
+		}(i, ip)
+	}
+
 	var lastErr error
-	for i, ip := range orderIPsV4First(ips) {
-		if i >= maxDialIPs {
-			break
-		}
-		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err == nil {
-			return conn, nil
-		}
-		lastErr = err
-		if ctx.Err() != nil {
-			break
+	for i := 0; i < len(ordered); i++ {
+		select {
+		case res := <-ch:
+			if res.err == nil {
+				cancel()
+				return res.conn, nil
+			}
+			lastErr = res.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no candidate ip to dial")
+		lastErr = fmt.Errorf("dial failed")
 	}
 	return nil, lastErr
 }
@@ -514,8 +555,9 @@ func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServe
 			if globalFastResolver != nil {
 				ips, rErr := globalFastResolver.ResolveHost(ctx, host)
 				if rErr == nil && len(ips) > 0 {
+					// 并发拨号下单 IP 无需长超时：800ms 内不响应的 IP 直接放弃，由其他 IP 竞速胜出
 					d := &net.Dialer{
-						Timeout:   3 * time.Second,
+						Timeout:   800 * time.Millisecond,
 						KeepAlive: 30 * time.Second,
 					}
 					if conn, dErr := dialIPsFallback(ctx, d, network, ips, port); dErr == nil {
@@ -657,7 +699,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		keyState, totalKeys := s.pool.PickNext()
 		if keyState == nil {
 			logAllUnavailable()
-			http.Error(w, `{"error":{"message":"Agnes 号池为空或全部处于冷却中，请稍后重试","type":"gateway_pool_empty"}}`, http.StatusServiceUnavailable)
+			if totalKeys > 0 {
+				// 全冷却：立即 503，让调用方马上知道该等，而不是干等一次注定 429 的上游往返
+				w.Header().Set("Retry-After", "30")
+				http.Error(w, fmt.Sprintf(`{"error":{"message":"Agnes 号池当前全部处于冷却中（共 %d 个 Key），请稍后重试","type":"gateway_pool_cooldown"}}`, totalKeys), http.StatusServiceUnavailable)
+			} else {
+				http.Error(w, `{"error":{"message":"Agnes 号池为空，请先配置 API Key","type":"gateway_pool_empty"}}`, http.StatusServiceUnavailable)
+			}
 			return
 		}
 
@@ -686,7 +734,12 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		ttfbSec := time.Since(subStart).Seconds()
 
 		if reqErr != nil {
-			log.Printf("%s [失败] 连接异常 (%.2fs) | Key: %s | %v", formatLogTime(), ttfbSec, keyState.DisplayName, reqErr)
+			// 客户端主动断开/超时导致 ctx 取消，不是 Key 的问题，不能冷却号池
+			if errors.Is(reqErr, context.Canceled) || errors.Is(reqErr, context.DeadlineExceeded) {
+				log.Printf("%s [中断] 客户端断开 (%.2fs) | Key: %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
+				return
+			}
+			log.Printf("%s [失败] 连接异常 (%.2fs) | Key: %s | %v", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState), reqErr)
 			s.pool.MarkCooldown(keyState, reqErr.Error(), 30*time.Second)
 			if totalKeys > 1 {
 				continue
@@ -729,7 +782,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			log.Printf("%s [失败] HTTP %d (%.2fs) | Key: %s", formatLogTime(), resp.StatusCode, ttfbSec, keyState.DisplayName)
+			log.Printf("%s [失败] HTTP %d (%.2fs) | Key: %s", formatLogTime(), resp.StatusCode, ttfbSec, s.pool.displayNameOf(keyState))
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 			if totalKeys > 1 {
 				continue
@@ -762,7 +815,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		if modelPart == "" {
 			modelPart = "default"
 		}
-		log.Printf("%s [成功] %.2fs | %s | Key: %s", formatLogTime(), ttfbSec, modelPart, keyState.DisplayName)
+		log.Printf("%s [成功] %.2fs | %s | Key: %s", formatLogTime(), ttfbSec, modelPart, s.pool.displayNameOf(keyState))
 
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
