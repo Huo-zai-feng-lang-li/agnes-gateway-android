@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.10] - 2026-11-08
+
+### 修复
+- **启动即闪退（阻断级）**：日志高亮正则 `PATTERN_KEY` 的字符类写成了 `[^\s|->]`，Java 正则引擎把 `|->` 解析为从 `|`(0x7C) 到 `>`(0x3E) 的区间，由于 x > y 直接抛 `PatternSyntaxException`。该正则是 `MainActivity` 的 `companion object` 静态常量，类初始化失败导致 `ExceptionInInitializerError`，App 一打开就崩溃。改为把 `-` 放到字符类末尾 `[^\s|>-]`。
+
+> v1.0.8 / v1.0.9 均受此问题影响（正则自 v1.0.8 引入），v1.0.7 不受影响。
+
 ## [v1.0.9] - 2026-11-08
 
 ### 性能与优化
@@ -144,6 +151,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.10]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.7

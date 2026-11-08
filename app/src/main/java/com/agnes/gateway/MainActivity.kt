@@ -867,6 +867,7 @@ class MainActivity : AppCompatActivity() {
         private val PATTERN_TAG_ERR = Regex("""\[[45]\d{2}\]""")
         private val PATTERN_TTFB = Regex("""\b\d+\.\d{2}s\b""")
         private val PATTERN_MODEL = Regex("""\|\s*([a-zA-Z0-9._-]+)\s*\|""")
-        private val PATTERN_KEY = Regex("""Key:\s*([^\s|->]+)""")
+        // 注意：字符类里的 "-" 必须放在末尾，否则 "|->" 会被解析成非法区间 (\u007C..\u003E) 导致类初始化崩溃
+        private val PATTERN_KEY = Regex("""Key:\s*([^\s|>-]+)""")
     }
 }

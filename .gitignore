@@ -13,3 +13,9 @@ release-apk/
 release-apk-v101/
 core/test_gateway.exe
 /keystore/
+# 临时构建/校验产物
+_apkchk/
+_*.json
+_*.js
+core/_*
+core/agnes-gateway-core.exe

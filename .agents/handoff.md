@@ -79,8 +79,16 @@
     - 真实端到端实测（3 个真实 Key）：流式 TTFB 0.34~0.70s；`/_gateway/status` 无明文 Key；Key 轮询均匀。
     - 版本递增至 **versionCode 10 / versionName 1.0.9**。
 
+30. **v1.0.10：修复启动即闪退（阻断级）**
+    - 用户反馈 v1.0.9 安装后一打开就闪退。通过 NP Manager MCP 的 `np_device_crash_report` / `np_device_logcat` 取到真实堆栈：
+      `java.lang.ExceptionInInitializerError` → `Caused by: PatternSyntaxException: In a character range [x-y], x is greater than y near index 15` → `at com.agnes.gateway.MainActivity.<clinit>(MainActivity.kt:870)`。
+    - 根因：`PATTERN_KEY = Regex("""Key:\s*([^\s|->]+)""")` 的字符类里 `-` 位于 `|` 与 `>` 之间，被解析为区间 `\u007C..\u003E`，因 x > y 非法。该正则是 `companion object` 静态常量，类初始化失败导致 Activity 无法实例化。
+    - 修复：改为 `Key:\s*([^\s|>-]+)`（`-` 置于字符类末尾）。已用 Node 逐一校验 8 条正则全部合法。
+    - 影响范围：v1.0.8 引入该正则，v1.0.8 / v1.0.9 均会闪退；v1.0.7 不受影响。
+    - 版本递增至 **versionCode 11 / versionName 1.0.10**。
+
 ## 未完成 / 下一步
-- 无待办。当前最新版本 v1.0.9。
+- 无待办。当前最新版本 v1.0.10。
 - 后续发版按 .agents/rules/README.md 流程执行（版本号禁含 4）。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
