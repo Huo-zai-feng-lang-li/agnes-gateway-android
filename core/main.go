@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -20,10 +19,36 @@ import (
 	"time"
 )
 
+// localLocation 确保日志与显示时间与用户本地时区严格一致
+var localLocation *time.Location
+
+func init() {
+	log.SetFlags(0)
+	// 优先检测系统时区，若为 UTC/无效则尝试根据 TZ 环境变量或默认 CST (UTC+8) 校准
+	loc := time.Local
+	if tz := os.Getenv("TZ"); tz != "" {
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
+	}
+	if loc == nil || loc == time.UTC {
+		localLocation = time.FixedZone("CST", 8*3600)
+	} else {
+		localLocation = loc
+	}
+}
+
+// formatLogTime 返回规范的当前时区时间格式 HH:mm:ss
+func formatLogTime() string {
+	return time.Now().In(localLocation).Format("15:04:05")
+}
+
 // KeyState 记录单个 Key 的运行时健康状态
 type KeyState struct {
 	Key          string    `json:"key"`
+	Alias        string    `json:"alias"`
 	MaskedKey    string    `json:"masked_key"`
+	DisplayName  string    `json:"display_name"`
 	CooldownTill time.Time `json:"cooldown_till"`
 	FailureCount int64     `json:"failure_count"`
 	SuccessCount int64     `json:"success_count"`
@@ -31,24 +56,70 @@ type KeyState struct {
 	Disabled     bool      `json:"disabled"`
 }
 
+// parseKeyEntry 解析包含可选备注名的 Key 行
+// 支持格式：
+// 1) sk-xxxx#备注名
+// 2) sk-xxxx----备注名
+// 3) sk-xxxx:备注名
+// 4) sk-xxxx 备注名
+// 5) 裸 sk-xxxx
+func parseKeyEntry(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+
+	delimiters := []string{"----", "#", " ", "\t"}
+	for _, delim := range delimiters {
+		if idx := strings.Index(raw, delim); idx > 0 {
+			key := strings.TrimSpace(raw[:idx])
+			alias := strings.TrimSpace(raw[idx+len(delim):])
+			if key != "" {
+				return key, alias
+			}
+		}
+	}
+	// 尝试单个英文冒号分隔（避免与 url 冲突，key 通常不含 :）
+	if idx := strings.Index(raw, ":"); idx > 0 && !strings.Contains(raw[:idx], "/") {
+		key := strings.TrimSpace(raw[:idx])
+		alias := strings.TrimSpace(raw[idx+1:])
+		if key != "" {
+			return key, alias
+		}
+	}
+
+	return raw, ""
+}
+
+// formatKeyDisplayName 格式化 Key 展示名称：截取末尾字符，有备注时展示备注
+func formatKeyDisplayName(key, alias string) (string, string) {
+	key = strings.TrimSpace(key)
+	var masked string
+	if len(key) <= 8 {
+		masked = "******"
+	} else {
+		// 截取末尾 4 个字符，如 ...piLR
+		masked = "..." + key[len(key)-4:]
+	}
+
+	if alias != "" {
+		return fmt.Sprintf("%s(%s)", alias, masked), masked
+	}
+	return masked, masked
+}
+
 // PoolManager 负责多 Key 轮询与智能退避调度
 type PoolManager struct {
 	mu           sync.RWMutex
 	keys         []*KeyState
+	bannedCount  int64
+	bannedKeys   []string // 因 401 被物理剔除的原始 Key 黑名单（供客户端定向清理）
 	currentIndex uint64
 	upstreamURL  string
 	cooldownSec  int
+	lastUsedKey  atomic.Pointer[string]
 }
 
-func maskKey(k string) string {
-	k = strings.TrimSpace(k)
-	if len(k) <= 8 {
-		return "******"
-	}
-	return k[:4] + "..." + k[len(k)-4:]
-}
-
-// extractModelName 从请求体中提取 model 字段，仅用于日志展示，失败时返回空串
 func extractModelName(body []byte) string {
 	if len(body) == 0 {
 		return ""
@@ -79,7 +150,7 @@ func NewPoolManager(upstream string, cooldownSec int) *PoolManager {
 	}
 }
 
-func (p *PoolManager) SetKeys(rawKeys []string) {
+func (p *PoolManager) SetKeys(rawEntries []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -90,29 +161,50 @@ func (p *PoolManager) SetKeys(rawKeys []string) {
 
 	var newKeys []*KeyState
 	seen := make(map[string]bool)
-	for _, k := range rawKeys {
-		k = strings.TrimSpace(k)
+	for _, entry := range rawEntries {
+		k, alias := parseKeyEntry(entry)
 		if k == "" || seen[k] {
 			continue
 		}
 		seen[k] = true
+		disp, masked := formatKeyDisplayName(k, alias)
+
 		if old, exists := keyMap[k]; exists {
+			old.Alias = alias
+			old.DisplayName = disp
+			old.MaskedKey = masked
 			newKeys = append(newKeys, old)
 		} else {
 			newKeys = append(newKeys, &KeyState{
-				Key:       k,
-				MaskedKey: maskKey(k),
+				Key:         k,
+				Alias:       alias,
+				MaskedKey:   masked,
+				DisplayName: disp,
 			})
 		}
 	}
 	p.keys = newKeys
-	log.Printf("[号池] 已加载 %d 个有效 Key", len(p.keys))
+	// 用户重新加入的 Key 视为已恢复，移出封禁黑名单，避免被客户端再次误清
+	kept := make([]string, 0, len(p.bannedKeys))
+	removedFromBanned := 0
+	for _, bk := range p.bannedKeys {
+		if !seen[bk] {
+			kept = append(kept, bk)
+		} else {
+			removedFromBanned++
+		}
+	}
+	p.bannedKeys = kept
+	if removedFromBanned > 0 {
+		atomic.AddInt64(&p.bannedCount, -int64(removedFromBanned))
+	}
+	log.Printf("%s [系统] 号池已加载 %d 个有效 Key", formatLogTime(), len(p.keys))
 }
 
 // PickNext 轮询挑选一个当前未处于冷却中的 Key
 func (p *PoolManager) PickNext() (*KeyState, int) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	total := len(p.keys)
 	if total == 0 {
@@ -130,10 +222,11 @@ func (p *PoolManager) PickNext() (*KeyState, int) {
 		if now.Before(ks.CooldownTill) {
 			continue
 		}
+		p.lastUsedKey.Store(&ks.DisplayName)
 		return ks, total
 	}
 
-	// 若所有 Key 都在冷却中，挑选最早解冻的那一个
+	// 若所有 Key 都在冷却中，挑选最早解冻的那一个（仅作为重试候选，不记录为当前活跃 Key）
 	var earliest *KeyState
 	for _, ks := range p.keys {
 		if ks.Disabled {
@@ -150,6 +243,21 @@ func (p *PoolManager) MarkSuccess(ks *KeyState) {
 	atomic.AddInt64(&ks.SuccessCount, 1)
 }
 
+// allUnavailableLocked 判断号池是否已无可用 Key（空池 / 全部冷却 / 全部禁用）。调用方需持有 p.mu。
+func (p *PoolManager) allUnavailableLocked(now time.Time) bool {
+	for _, ks := range p.keys {
+		if !ks.Disabled && !now.Before(ks.CooldownTill) {
+			return false
+		}
+	}
+	return true
+}
+
+// logAllUnavailable 输出统一告警日志，供 Android 前台服务在后台直接识别并触发强提醒
+func logAllUnavailable() {
+	log.Printf("%s [告警] 号池全部不可用 (所有Key均被限流或已失效)", formatLogTime())
+}
+
 func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time.Duration) {
 	if duration <= 0 {
 		duration = time.Duration(p.cooldownSec) * time.Second
@@ -158,33 +266,214 @@ func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time
 	p.mu.Lock()
 	ks.CooldownTill = time.Now().Add(duration)
 	ks.LastError = errReason
+	dead := p.allUnavailableLocked(time.Now())
 	p.mu.Unlock()
-	log.Printf("[号池退避] Key %s 触发限流/错误 (%s)，冷却 %v 至 %s", ks.MaskedKey, errReason, duration, ks.CooldownTill.Format("15:04:05"))
+	log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), ks.DisplayName, duration)
+	if dead {
+		logAllUnavailable()
+	}
 }
 
-func (p *PoolManager) MarkDisabled(ks *KeyState, errReason string) {
-	atomic.AddInt64(&ks.FailureCount, 1)
+// RemoveKey 检测到 401 封禁时从号池中物理剔除该 Key，并记入封禁黑名单
+func (p *PoolManager) RemoveKey(key string, errReason string) bool {
 	p.mu.Lock()
-	ks.Disabled = true
-	ks.LastError = errReason
-	p.mu.Unlock()
-	log.Printf("[号池禁用] Key %s 永久失效/无效 (%s)，已禁用", ks.MaskedKey, errReason)
+	defer p.mu.Unlock()
+
+	removed := false
+	var updated []*KeyState
+	var targetDisp string
+	for _, ks := range p.keys {
+		if ks.Key == key {
+			removed = true
+			targetDisp = ks.DisplayName
+			atomic.AddInt64(&p.bannedCount, 1)
+			continue
+		}
+		updated = append(updated, ks)
+	}
+	if removed {
+		p.keys = updated
+		p.bannedKeys = append(p.bannedKeys, key)
+		log.Printf("%s [封禁] 401 凭证失效 | Key: %s -> 已从号池剔除", formatLogTime(), targetDisp)
+		if p.allUnavailableLocked(time.Now()) {
+			logAllUnavailable()
+		}
+	}
+	return removed
 }
 
-func (p *PoolManager) Snapshot() ([]KeyState, string) {
+// BannedKeys 返回因 401 被剔除的原始 Key 黑名单副本
+func (p *PoolManager) BannedKeys() []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	list := make([]KeyState, len(p.keys))
-	for i, ks := range p.keys {
-		list[i] = *ks
-	}
-	return list, p.upstreamURL
+	return append(make([]string, 0, len(p.bannedKeys)), p.bannedKeys...)
 }
 
-// customResolver 供上游 http.Transport 复用；nil 表示使用系统默认解析器
-var customResolver *net.Resolver
+func (p *PoolManager) Snapshot() ([]KeyState, string, string, int, int, int) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
-// normalizeDNSServer 将裸 IP / host:port 归一化成 host:port 形式
+	now := time.Now()
+	list := make([]KeyState, len(p.keys))
+	available := 0
+	cooldown := 0
+
+	for i, ks := range p.keys {
+		list[i] = *ks
+		if !ks.Disabled {
+			if !now.Before(ks.CooldownTill) {
+				available++
+			} else {
+				cooldown++
+			}
+		}
+	}
+	banned := int(atomic.LoadInt64(&p.bannedCount))
+	lastUsed := ""
+	if ptr := p.lastUsedKey.Load(); ptr != nil {
+		lastUsed = *ptr
+	}
+	return list, p.upstreamURL, lastUsed, available, cooldown, banned
+}
+
+// ==========================================
+// 极速 DNS 竞速与内存缓存解析器 (<1s 性能保证)
+// ==========================================
+
+type dnsCacheEntry struct {
+	ips     []net.IP
+	expires time.Time
+}
+
+type FastDNSResolver struct {
+	servers []string
+	cache   sync.Map
+	ttl     time.Duration
+}
+
+func NewFastDNSResolver(servers []string) *FastDNSResolver {
+	return &FastDNSResolver{
+		servers: servers,
+		ttl:     10 * time.Minute, // 10分钟长效缓存，彻底消除每次请求的 DNS 延迟
+	}
+}
+
+// ResolveHost 并发竞速向可用 DNS 查询 host，并进行内存缓存
+func (r *FastDNSResolver) ResolveHost(ctx context.Context, host string) ([]net.IP, error) {
+	if host == "" {
+		return nil, fmt.Errorf("empty host")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+
+	// 1. 优先查缓存 (0ms 极速命中)
+	if val, ok := r.cache.Load(host); ok {
+		entry := val.(dnsCacheEntry)
+		if time.Now().Before(entry.expires) && len(entry.ips) > 0 {
+			return entry.ips, nil
+		}
+	}
+
+	// 2. 缓存未命中或过期，并发竞速查询 (Fastest Race)
+	if len(r.servers) == 0 {
+		// 回退系统解析
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err == nil && len(ips) > 0 {
+			r.cache.Store(host, dnsCacheEntry{ips: ips, expires: time.Now().Add(r.ttl)})
+		}
+		return ips, err
+	}
+
+	type raceRes struct {
+		ips []net.IP
+		err error
+	}
+	ch := make(chan raceRes, len(r.servers))
+	raceCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer cancel()
+
+	for _, s := range r.servers {
+		go func(server string) {
+			subResolver := &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+					d := &net.Dialer{Timeout: 800 * time.Millisecond}
+					return d.DialContext(ctx, network, server)
+				},
+			}
+			ips, err := subResolver.LookupIP(raceCtx, "ip", host)
+			ch <- raceRes{ips: ips, err: err}
+		}(s)
+	}
+
+	var firstErr error
+	for i := 0; i < len(r.servers); i++ {
+		select {
+		case res := <-ch:
+			if res.err == nil && len(res.ips) > 0 {
+				// 最快成功的立即写入缓存，并取消其余 DNS 查询协程
+				cancel()
+				r.cache.Store(host, dnsCacheEntry{ips: res.ips, expires: time.Now().Add(r.ttl)})
+				return res.ips, nil
+			}
+			if firstErr == nil && res.err != nil {
+				firstErr = res.err
+			}
+		case <-raceCtx.Done():
+			return nil, raceCtx.Err()
+		}
+	}
+
+	if firstErr == nil {
+		firstErr = fmt.Errorf("all dns servers failed to resolve %s", host)
+	}
+	return nil, firstErr
+}
+
+var globalFastResolver *FastDNSResolver
+
+// maxDialIPs 单次拨号最多尝试的候选 IP 数，防止最坏情况下累计超时过长
+const maxDialIPs = 4
+
+// orderIPsV4First 将 IPv4 地址排在前面（稳定顺序），避免无 IPv6 路由网络下首选 AAAA 挂起
+func orderIPsV4First(ips []net.IP) []net.IP {
+	out := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			out = append(out, ip)
+		}
+	}
+	for _, ip := range ips {
+		if ip.To4() == nil {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
+// dialIPsFallback 依次尝试候选 IP（IPv4 优先），首个成功即返回
+func dialIPsFallback(ctx context.Context, d *net.Dialer, network string, ips []net.IP, port string) (net.Conn, error) {
+	var lastErr error
+	for i, ip := range orderIPsV4First(ips) {
+		if i >= maxDialIPs {
+			break
+		}
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no candidate ip to dial")
+	}
+	return nil, lastErr
+}
+
 func normalizeDNSServer(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -199,66 +488,6 @@ func normalizeDNSServer(raw string) (string, bool) {
 	return "", false
 }
 
-// newResolver 构造基于指定 DNS 服务器的纯 Go 解析器
-func newResolver(servers []string) *net.Resolver {
-	if len(servers) == 0 {
-		return nil
-	}
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			dialer := &net.Dialer{Timeout: 3 * time.Second}
-			var lastErr error
-			for _, server := range servers {
-				conn, err := dialer.DialContext(ctx, network, server)
-				if err == nil {
-					return conn, nil
-				}
-				lastErr = err
-			}
-			if lastErr == nil {
-				lastErr = fmt.Errorf("no dns server available")
-			}
-			return nil, lastErr
-		},
-	}
-}
-
-// probeDNSServers 并行探测候选 DNS 服务器是否可用，按原顺序返回可用项
-func probeDNSServers(servers []string, host string) []string {
-	if len(servers) == 0 || host == "" || net.ParseIP(host) != nil {
-		return servers
-	}
-	type probeResult struct {
-		idx int
-		ok  bool
-	}
-	ch := make(chan probeResult, len(servers))
-	for i, server := range servers {
-		go func(i int, server string) {
-			r := newResolver([]string{server})
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			_, err := r.LookupHost(ctx, host)
-			ch <- probeResult{idx: i, ok: err == nil}
-		}(i, server)
-	}
-	okSet := make(map[int]bool, len(servers))
-	for range servers {
-		r := <-ch
-		if r.ok {
-			okSet[r.idx] = true
-		}
-	}
-	var ordered []string
-	for i, server := range servers {
-		if okSet[i] {
-			ordered = append(ordered, server)
-		}
-	}
-	return ordered
-}
-
 // GatewayServer 反代网关
 type GatewayServer struct {
 	pool       *PoolManager
@@ -271,27 +500,50 @@ func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServe
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	// 上游长连接复用池（HTTP/2 + Keep-Alive + 自定义 DNS 解析）
+
+	// 极速上游长连接传输层（预热复用 + Keep-Alive + 内存缓存 DNS）
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-			Resolver:  customResolver,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				host = addr
+				port = "443"
+			}
+			// 使用极速并发缓存 DNS 解析；IPv4 优先并逐 IP 回退，全部失败再走系统直连兜底
+			if globalFastResolver != nil {
+				ips, rErr := globalFastResolver.ResolveHost(ctx, host)
+				if rErr == nil && len(ips) > 0 {
+					d := &net.Dialer{
+						Timeout:   3 * time.Second,
+						KeepAlive: 30 * time.Second,
+					}
+					if conn, dErr := dialIPsFallback(ctx, d, network, ips, port); dErr == nil {
+						return conn, nil
+					}
+				}
+			}
+			// 兜底系统直连
+			d := &net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}
+			return d.DialContext(ctx, network, addr)
+		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   50,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
+		MaxIdleConnsPerHost:   30,
+		IdleConnTimeout:       120 * time.Second,
+		TLSHandshakeTimeout:   4 * time.Second,
 		ResponseHeaderTimeout: 60 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 
 	return &GatewayServer{
 		pool: pool,
 		client: &http.Client{
 			Transport: transport,
-			Timeout:   0, // 流式响应不能设全局超时
+			Timeout:   0, // 流式长响应不设全局超时
 		},
 		listenAddr: fmt.Sprintf("0.0.0.0:%d", port),
 		maxRetries: maxRetries,
@@ -308,7 +560,7 @@ func (s *GatewayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 管理接口 (仅限本机回环访问，杜绝局域网未授权修改)
+	// 管理接口 (仅限本机回环访问)
 	if strings.HasPrefix(r.URL.Path, "/_gateway/") {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -329,7 +581,7 @@ func (s *GatewayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"status":   "running",
 			"service":  "agnes-gateway-android",
 			"upstream": s.pool.upstreamURL,
-			"time":     time.Now().Format(time.RFC3339),
+			"time":     formatLogTime(),
 		})
 		return
 	}
@@ -341,20 +593,17 @@ func (s *GatewayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *GatewayServer) handleInternalAPI(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/_gateway/status":
-		list, upstream := s.pool.Snapshot()
-		available := 0
-		now := time.Now()
-		for _, k := range list {
-			if !k.Disabled && now.After(k.CooldownTill) {
-				available++
-			}
-		}
+		list, upstream, lastUsed, available, cooldown, banned := s.pool.Snapshot()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]any{
-			"upstream":       upstream,
-			"total_keys":     len(list),
-			"available_keys": available,
-			"keys":           list,
+			"upstream":        upstream,
+			"last_used_key":   lastUsed,
+			"total_keys":      len(list),
+			"available_keys":  available,
+			"cooldown_keys":   cooldown,
+			"banned_keys":     banned,
+			"banned_key_list": s.pool.BannedKeys(),
+			"keys":            list,
 		})
 
 	case "/_gateway/keys":
@@ -371,7 +620,6 @@ func (s *GatewayServer) handleInternalAPI(w http.ResponseWriter, r *http.Request
 			Keys []string `json:"keys"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
-			// 兼容纯换行文本格式
 			lines := strings.Split(string(body), "\n")
 			s.pool.SetKeys(lines)
 		} else {
@@ -386,7 +634,6 @@ func (s *GatewayServer) handleInternalAPI(w http.ResponseWriter, r *http.Request
 }
 
 func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
-	// 读取请求体（为了重试机制，必须全量缓存请求体）
 	var reqBody []byte
 	if r.Body != nil {
 		var err error
@@ -398,9 +645,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		r.Body.Close()
 	}
 
-	// 请求元信息（仅用于日志，不记录请求体/响应体，避免隐私与性能开销）
-	startTime := time.Now()
 	reqModel := extractModelName(reqBody)
+	if reqModel == "" && strings.Contains(r.URL.Path, "models") {
+		reqModel = "models"
+	}
 
 	var lastStatusCode int
 	var lastErrBody []byte
@@ -408,6 +656,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 	for attempt := 0; attempt < s.maxRetries; attempt++ {
 		keyState, totalKeys := s.pool.PickNext()
 		if keyState == nil {
+			logAllUnavailable()
 			http.Error(w, `{"error":{"message":"Agnes 号池为空或全部处于冷却中，请稍后重试","type":"gateway_pool_empty"}}`, http.StatusServiceUnavailable)
 			return
 		}
@@ -423,22 +672,21 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 复制原有请求头
 		for k, v := range r.Header {
-			// 跳过 Hop-by-hop 头
 			if strings.EqualFold(k, "Connection") || strings.EqualFold(k, "Keep-Alive") || strings.EqualFold(k, "Host") {
 				continue
 			}
 			outReq.Header[k] = v
 		}
-
-		// 注入号池中被轮询选中的 Agnes Key
 		outReq.Header.Set("Authorization", "Bearer "+keyState.Key)
 
-		// 发起上游请求
+		// 记录发起单次上游调用的精准耗时（首字时间 TTFB）
+		subStart := time.Now()
 		resp, reqErr := s.client.Do(outReq)
+		ttfbSec := time.Since(subStart).Seconds()
+
 		if reqErr != nil {
-			log.Printf("[转发失败] Key %s 错误 (尝试 %d/%d): %v", keyState.MaskedKey, attempt+1, s.maxRetries, reqErr)
+			log.Printf("%s [失败] 连接异常 (%.2fs) | Key: %s | %v", formatLogTime(), ttfbSec, keyState.DisplayName, reqErr)
 			s.pool.MarkCooldown(keyState, reqErr.Error(), 30*time.Second)
 			if totalKeys > 1 {
 				continue
@@ -447,14 +695,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 针对 429 速率限制退避重试 (30 秒灵敏冷却)
+		// 针对 429 速率限制退避重试 (30 秒冷却)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			errBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
 			s.pool.MarkCooldown(keyState, "429_rate_limit", 30*time.Second)
-			log.Printf("[429 限速] Key %s 触发 429，立即切换下一个 Key 重试 (尝试 %d/%d)", keyState.MaskedKey, attempt+1, s.maxRetries)
 			if totalKeys > 1 {
 				continue
 			}
@@ -462,14 +709,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 针对 401 凭证无效（失效）标记禁用
+		// 针对 401 凭证无效（失效）直接从号池彻底移除
 		if resp.StatusCode == http.StatusUnauthorized {
 			errBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			s.pool.MarkDisabled(keyState, "401_unauthorized")
-			log.Printf("[401 凭证无效] Key %s 已被上游拒绝，自动禁用", keyState.MaskedKey)
+			s.pool.RemoveKey(keyState.Key, "401_unauthorized")
 			if totalKeys > 1 {
 				continue
 			}
@@ -483,6 +729,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
+			log.Printf("%s [失败] HTTP %d (%.2fs) | Key: %s", formatLogTime(), resp.StatusCode, ttfbSec, keyState.DisplayName)
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 			if totalKeys > 1 {
 				continue
@@ -495,7 +742,6 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		s.pool.MarkSuccess(keyState)
 		defer resp.Body.Close()
 
-		// 复制响应头，清理 Hop-by-hop 头与 Content-Length（流式传输使用 chunked）
 		isSSE := strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 		for k, vv := range resp.Header {
 			if strings.EqualFold(k, "Connection") || strings.EqualFold(k, "Keep-Alive") ||
@@ -511,26 +757,18 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 成功请求日志：只记录状态/路径/模型/脱敏 Key/耗时/是否流式
-		modelPart := ""
-		if reqModel != "" {
-			modelPart = " model=" + reqModel
+		// 规范化输出极简日志：日志时间、成功状态、首字响应时间、模型、Key/备注
+		modelPart := reqModel
+		if modelPart == "" {
+			modelPart = "default"
 		}
-		streamPart := ""
-		if isSSE {
-			streamPart = " stream=true"
-		}
-		log.Printf("[%d] %s %s%s | Key %s | %.2fs%s",
-			resp.StatusCode, r.Method, r.URL.Path, modelPart,
-			keyState.MaskedKey, time.Since(startTime).Seconds(), streamPart)
+		log.Printf("%s [成功] %.2fs | %s | Key: %s", formatLogTime(), ttfbSec, modelPart, keyState.DisplayName)
 
-		// 流式 Flush 透传（支持 SSE 与实时流式生成）
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
 		for {
 			select {
 			case <-r.Context().Done():
-				// 客户端主动中断（如停止生成、取消请求），快速 drain 剩余 buffer 并退出，保障连接池复用
 				io.CopyN(io.Discard, resp.Body, 64*1024)
 				return
 			default:
@@ -539,7 +777,6 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
 				if _, wErr := w.Write(buf[:n]); wErr != nil {
-					// 客户端网络断开
 					io.CopyN(io.Discard, resp.Body, 64*1024)
 					return
 				}
@@ -554,7 +791,6 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 全部重试用尽
 	if lastStatusCode != 0 {
 		s.writeUpstreamError(w, lastStatusCode, lastErrBody)
 	} else {
@@ -582,15 +818,17 @@ func main() {
 	keysFlag := flag.String("keys", "", "逗号分隔的 Key 列表")
 	flag.Parse()
 
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	// 不使用标准库默认微秒前缀，由业务代码统一提供 formatLogTime()
+	log.SetFlags(0)
+
 	log.Printf("==================================================")
 	log.Printf("   Agnes 手机反代网关核心 (Agnes Gateway Core)     ")
 	log.Printf("==================================================")
-	log.Printf("上游地址: %s", *upstream)
-	log.Printf("监听端口: %d", *port)
-	log.Printf("冷却退避: %d 秒", *cooldown)
+	log.Printf("%s [系统] 上游地址: %s", formatLogTime(), *upstream)
+	log.Printf("%s [系统] 监听端口: %d", formatLogTime(), *port)
+	log.Printf("%s [系统] 冷却退避: %d 秒", formatLogTime(), *cooldown)
 
-	// 装配 DNS：优先使用 App 传入的系统 DNS，其次国内公共 DNS 兜底
+	// 装配 DNS
 	var dnsServers []string
 	seenDNS := make(map[string]bool)
 	appendDNS := func(raw string) {
@@ -608,22 +846,11 @@ func main() {
 		appendDNS(raw)
 	}
 
-	upstreamHost := ""
-	if u, err := url.Parse(*upstream); err == nil {
-		upstreamHost = u.Hostname()
-	}
-	usableDNS := probeDNSServers(dnsServers, upstreamHost)
-	if len(usableDNS) == 0 {
-		log.Printf("[DNS] 候选 DNS 均探测失败，按默认顺序尝试: %s", strings.Join(dnsServers, ", "))
-		usableDNS = dnsServers
-	} else {
-		log.Printf("[DNS] 可用 DNS 服务器: %s", strings.Join(usableDNS, ", "))
-	}
-	customResolver = newResolver(usableDNS)
+	globalFastResolver = NewFastDNSResolver(dnsServers)
+	log.Printf("%s [系统] 极速 DNS 并发缓存解析器已就绪 (候选: %s)", formatLogTime(), strings.Join(dnsServers, ", "))
 
 	pool := NewPoolManager(*upstream, *cooldown)
 
-	// 从参数或文件加载初始 Key
 	var initialKeys []string
 	if *keysFlag != "" {
 		initialKeys = append(initialKeys, strings.Split(*keysFlag, ",")...)
@@ -633,7 +860,6 @@ func main() {
 			initialKeys = append(initialKeys, strings.Split(string(content), "\n")...)
 		}
 	}
-	// 从环境变量加载初始 Key
 	if envKeys := os.Getenv("AGNES_KEYS"); envKeys != "" {
 		initialKeys = append(initialKeys, strings.Split(envKeys, ",")...)
 	}
@@ -647,20 +873,19 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("网关服务已启动，局域网监听地址: http://0.0.0.0:%d/v1", *port)
+		log.Printf("%s [系统] 网关服务已启动，局域网监听地址: http://0.0.0.0:%d/v1", formatLogTime(), *port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("网关服务异常退出: %v", err)
+			log.Fatalf("%s [系统] 网关服务异常退出: %v", formatLogTime(), err)
 		}
 	}()
 
-	// 捕获优雅退出信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Printf("收到退出信号，正在优雅关闭网关...")
+	log.Printf("%s [系统] 收到退出信号，正在优雅关闭网关...", formatLogTime())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpServer.Shutdown(ctx)
-	log.Printf("网关服务已安全终止。")
+	log.Printf("%s [系统] 网关服务已安全终止。", formatLogTime())
 }

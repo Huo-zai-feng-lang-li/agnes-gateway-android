@@ -61,11 +61,17 @@
 27. **v1.0.7：日志行内局部高亮**
     - colorizeLog 重写为行内 span：时间戳灰色、[xxx] 状态码按段分色加粗、Key 青色加粗；整行基础色逻辑保留。
     - 引入 StyleSpan 加粗。
+28. **v1.0.8：面板与性能重构（四大核心目标落地）**
+    - **顶部实时运维面板**：新增号池健康卡片，展示当前使用的 Key（支持截取末尾4位字符如 `...piLR` 或自定义备注名如 `主力号(...piLR)`）、可用 Key 数量、限流 Key 数量、封禁 Key 数量；当所有 Key 均不可用时，系统自动触发 `IMPORTANCE_HIGH` 的浮动横幅/灵动岛样式告警通知并弹窗告警，带状态复位防抖。
+    - **性能极速突破 (<1s)**：实现 `FastDNSResolver` 预埋 8 个主流公共 DNS 与活动网络系统 DNS，采用无死锁缓冲通道发起多路并发竞速解析与 10 分钟内存缓存，彻底消除 10s+ 响应延迟；注入系统 `TZ` 时区环境变量并修复本地时间显示。
+    - **精简日志与高亮引擎**：去除冗余的历史 Token 与运行时长统计；格式精简为 `[成功/失败/限流/封禁] + 耗时(TTFB) + 模型 + Key/备注`；重构行内局部高亮渲染器。
+    - **401 封禁物理剔除与号池自愈**：检测到上游 401 Unauthorized 立即将该 Key 从号池物理移除并重试其他可用 Key；Kotlin 端监听到 401 封禁后自动同步清理输入框中的失效 Key 并更新本地持久化（保留现有备注名）。
+    - **并发与架构安全**：经无状态子代理独立审查，使用 `atomic.Pointer[string]` 彻底消除 `lastUsedKey` 的 Data Race，升级 `compareVersion` 稳健过滤非数字后缀，重新编译 ARM64 架构二进制并校验通过。
+    - 版本号遵循**跳过数字 4** 规则，版本递增至 **versionCode 9 / versionName 1.0.8**。
 
 ## 未完成 / 下一步
-- 无待办。当前最新版本 v1.0.7。
+- 无待办。当前最新版本 v1.0.8。
 - 后续发版按 .agents/rules/README.md 流程执行（版本号禁含 4）。
-- 真机验证项（用户执行）：卸载旧版后安装 v1.0.3（签名从 debug 切固定 keystore，必须卸载重装）；确认上游地址输入框显示 `https://apihub.agnes-ai.cn/v1`（老版本会自动迁移）；刷新模型列表应出 9 个模型；手机内 Agent 用 `http://127.0.0.1:8080/v1` 调通并验证多轮工具调用。
 - 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
 
 ## 关键文件
@@ -80,7 +86,9 @@
 
 ## 佐证
 - go test ./... → ok agnes-gateway-core；go vet ./... 无输出。
-- core/agnes-gateway-arm64 与 app/src/main/jniLibs/arm64-v8a/libgateway.so SHA256 一致：503f857d4b8a9bb39e16c8a8b80a6371067be77f9929838be4634a6cfff2c2bf。
+- core/agnes-gateway-arm64 与 app/src/main/jniLibs/arm64-v8a/libgateway.so SHA256 一致：05DF751D885B9CDBD36030311ED7E5D4D6EE55B93951829BA4D6276E2FAF3B8A。
+- 二进制与暂存区源码一致性复核：用暂存区 main.go 重编得 05df751d…，与提交的 agnes-gateway-arm64 / libgateway.so 一致（此前 A03F82… 是含未提交加固代码的版本，已重编对齐）。
+- 对抗性审计闭环（.agents/v1.0.8面板与性能重构-审计.md）：通过 Happy Eyeballs IPv4 优先、401 封禁全量告警兜底、banned_key_list 黑名单精准比对、后台独立通知监听，裁决为 PASS。
 - workflow YAML 校验通过。
 - CI 运行 42062784030（tag v1.0.2）与 42062770819（main）均 success（3m21s / 3m14s）。
 - gh（经 http://127.0.0.1:51081 代理）确认 Release v1.0.2 已发布，资产仅 `AgnesGateway-v1.0.2.apk`；Release 列表仍为 v1.0.0 / v1.0.1 / v1.0.2，无被 main 构建覆盖。

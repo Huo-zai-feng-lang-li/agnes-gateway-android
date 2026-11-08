@@ -108,6 +108,138 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <!-- 实时运维面板 -->
+        <LinearLayout
+            android:id="@+id/cardPoolDashboard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#1E1E1E"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="实时运维面板"
+                    android:textColor="#E0E0E0"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvPoolHealth"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="号池正常"
+                    android:textColor="#00E676"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- 当前正在使用的 Key -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="当前正在使用的 Key:"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvCurrentKey"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="#2C2C2C"
+                android:fontFamily="monospace"
+                android:padding="8dp"
+                android:text="空闲待命"
+                android:textColor="#00E5FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <!-- 三维指标徽章：可用 / 限流 / 封禁 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvAvailableKeys"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="#1B5E20"
+                    android:gravity="center"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="可用: 0"
+                    android:textColor="#A5D6A7"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvCooldownKeys"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="#E65100"
+                    android:gravity="center"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="限流: 0"
+                    android:textColor="#FFE082"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvBannedKeys"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="#B71C1C"
+                    android:gravity="center"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="封禁: 0"
+                    android:textColor="#FFCDD2"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- 警示横幅：所有 Key 均不可用时显示 -->
+            <LinearLayout
+                android:id="@+id/layoutAlertBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="#B71C1C"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="8dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvAlertBanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⚠️ 警告：当前所有 Key 均不可用！全部被限流或已失效"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- 配置卡片 -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -178,7 +310,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Agnes Key 号池 (一行一个，多 Key 轮询):"
+                    android:text="Agnes Key 号池 (支持 # 或 ---- 备注名):"
                     android:textColor="#AAAAAA"
                     android:textSize="12sp" />
 
@@ -200,7 +332,7 @@
                 android:layout_marginTop="4dp"
                 android:background="#2C2C2C"
                 android:gravity="top|start"
-                android:hint="sk-agnes-key1&#10;sk-agnes-key2&#10;sk-agnes-key3"
+                android:hint="sk-key1#主力号&#10;sk-key2----备用号&#10;sk-key3 应急号"
                 android:inputType="textMultiLine"
                 android:padding="10dp"
                 android:scrollbars="vertical"
@@ -212,7 +344,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:text="运行中修改 Key 后，点右上角「热更新号池」即可立即生效，无需重启网关。"
+                android:text="支持每行 Key 后加 #备注（如 sk-xxx#主力号）；401 封禁自动剔除；运行中修改点右上角热更新生效。"
                 android:textColor="#777777"
                 android:textSize="11sp" />
         </LinearLayout>

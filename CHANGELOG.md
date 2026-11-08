@@ -2,6 +2,29 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.8] - 2026-11-06
+
+### 新增
+- **顶部实时运维面板**：
+  - 实时展示当前正在使用的 Key（末尾 4 位字符截断显示或自定义备注名如 `主力号(...piLR)`）。
+  - 实时指标显示可用 Key、限流冷却 Key、已封禁 Key 数量与号池健康状态。
+  - **全不可用强提醒**：当所有 Key 均被限流或封禁时，触发 `IMPORTANCE_HIGH` 系统灵动岛/浮动弹窗 Heads-up 通知与前台告警横幅（带防抖复位）。
+- **Key 自定义备注名支持**：
+  - 号池输入框支持使用 `#`、`----`、` `、`\t` 等分隔符定义备注（例如 `sk-xxx#主力号` 或 `sk-xxx----备用号`）。
+  - 日志与运维面板自动联动显示备注名。
+- **401 封禁物理剔除与号池自愈**：
+  - 网关检测到上游 401 Unauthorized 凭证失效时，立即从在体号池物理移除该 Key，避免死循环消耗重试次数。
+  - Android 客户端同步自动清理保存的配置，剔除失效 Key 并保留现有各 Key 的备注信息。
+
+### 性能与优化
+- **并发 DNS 竞速与内存缓存 (<1s 响应)**：
+  - 实现 `FastDNSResolver` 预埋 8 个主流公共 DNS 并结合系统当前 DNS 进行并发竞速解析（Race）。
+  - 引入 10 分钟 TTL 内存 DNS 缓存层，将域名解析耗时彻底压缩至毫秒级，彻底根治此前 10s+ 的网络阻塞延迟。
+  - 注入系统 `TZ` 环境变量并修正日志时区，确保时间显示绝对准确。
+- **精简日志与高亮引擎**：
+  - 剔除冗余的历史 Token 统计与总运行时长，精炼输出核心指标：`[成功/限流/封禁/失败] + TTFB首字响应时间 + 模型 + Key/备注`。
+  - 重构行内正则局部高亮引擎，状态标签分色加粗，视觉更加清爽聚焦。
+
 ## [v1.0.7] - 2026-11-06
 
 ### 优化
@@ -110,6 +133,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.8]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.5

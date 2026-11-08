@@ -26,6 +26,8 @@ class GatewayService : Service() {
     companion object {
         const val CHANNEL_ID = "agnes_gateway_channel"
         const val NOTIFICATION_ID = 1001
+        const val ALERT_CHANNEL_ID = "agnes_gateway_alert_channel"
+        const val ALERT_NOTIFICATION_ID = 1002
 
         const val ACTION_START = "com.agnes.gateway.START"
         const val ACTION_STOP = "com.agnes.gateway.STOP"
@@ -37,8 +39,34 @@ class GatewayService : Service() {
         const val EXTRA_DNS = "extra_dns"
         const val EXTRA_LOG_LINE = "extra_log_line"
 
+        @Volatile
         var isRunning: Boolean = false
             private set
+
+        fun triggerAllKeysUnavailableAlert(context: Context) {
+            try {
+                val pendingIntent = PendingIntent.getActivity(
+                    context,
+                    0,
+                    Intent(context, MainActivity::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val notification = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+                    .setContentTitle("⚠️ Agnes 号池全部不可用")
+                    .setContentText("当前所有 Key 均被限流或已失效，请补充有效 Key！")
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setDefaults(NotificationCompat.DEFAULT_ALL)
+                    .setAutoCancel(true)
+                    .setContentIntent(pendingIntent)
+                    .build()
+
+                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(ALERT_NOTIFICATION_ID, notification)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -174,6 +202,10 @@ class GatewayService : Service() {
                 // 注入环境
                 val env = processBuilder.environment()
                 env["TMPDIR"] = cacheDir.absolutePath
+                try {
+                    env["TZ"] = java.util.TimeZone.getDefault().id
+                } catch (_: Exception) {
+                }
 
                 val proc = processBuilder.start()
                 process = proc
@@ -181,7 +213,11 @@ class GatewayService : Service() {
                 val reader = BufferedReader(InputStreamReader(proc.inputStream))
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
-                    broadcastLog(line ?: "")
+                    val msg = line ?: ""
+                    broadcastLog(msg)
+                    if (msg.contains("[告警]") && msg.contains("号池全部不可用")) {
+                        triggerAllKeysUnavailableAlert(applicationContext)
+                    }
                 }
 
                 val exitCode = proc.waitFor()
@@ -234,15 +270,27 @@ class GatewayService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java)
+
+            val normalChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Agnes 网关常驻通知",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "保持 Agnes 手机反代网关在后台持续运行"
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(normalChannel)
+
+            val alertChannel = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "Agnes 号池告警通知",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "号池全部不可用时的紧急告警通知（支持浮动横幅/灵动岛样式）"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(alertChannel)
         }
     }
 

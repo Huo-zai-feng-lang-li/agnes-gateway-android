@@ -22,7 +22,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version: '1.22'  # 与 core/go.mod 保持一致；本地产物仅供仓库归档，CI 会重新编译
 
     - name: Compile Go Gateway Core for Android ARM64
       run: |

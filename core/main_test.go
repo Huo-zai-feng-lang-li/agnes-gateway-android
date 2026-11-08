@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,16 +23,47 @@ func TestPoolManager_NormalizationAndMask(t *testing.T) {
 	}
 	pool.SetKeys(keys)
 
-	list, _ := pool.Snapshot()
+	list, _, _, available, _, _ := pool.Snapshot()
 	if len(list) != 2 {
 		t.Fatalf("expected 2 keys, got %d", len(list))
 	}
+	if available != 2 {
+		t.Fatalf("expected 2 available keys, got %d", available)
+	}
 
-	if list[0].MaskedKey != "sk-a...cdef" {
+	if list[0].MaskedKey != "...cdef" {
 		t.Fatalf("unexpected masked key: %s", list[0].MaskedKey)
 	}
 	if list[1].MaskedKey != "******" {
 		t.Fatalf("unexpected masked key for short key: %s", list[1].MaskedKey)
+	}
+}
+
+func TestPoolManager_AliasParsing(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
+	pool.SetKeys([]string{
+		"sk-1234567890abcdef#主力号",
+		"sk-9876543210fedcba----备用号",
+		"sk-abcdef1234567890 应急号",
+		"sk-plainkey12345678",
+	})
+
+	list, _, _, _, _, _ := pool.Snapshot()
+	if len(list) != 4 {
+		t.Fatalf("expected 4 keys, got %d", len(list))
+	}
+
+	if list[0].Alias != "主力号" || list[0].DisplayName != "主力号(...cdef)" {
+		t.Fatalf("alias 1 mismatch: %s / %s", list[0].Alias, list[0].DisplayName)
+	}
+	if list[1].Alias != "备用号" || list[1].DisplayName != "备用号(...dcba)" {
+		t.Fatalf("alias 2 mismatch: %s / %s", list[1].Alias, list[1].DisplayName)
+	}
+	if list[2].Alias != "应急号" || list[2].DisplayName != "应急号(...7890)" {
+		t.Fatalf("alias 3 mismatch: %s / %s", list[2].Alias, list[2].DisplayName)
+	}
+	if list[3].Alias != "" || list[3].DisplayName != "...5678" {
+		t.Fatalf("alias 4 mismatch: %s / %s", list[3].Alias, list[3].DisplayName)
 	}
 }
 
@@ -59,6 +92,63 @@ func TestPoolManager_RoundRobinAndCooldown(t *testing.T) {
 	k1Again, _ := pool.PickNext()
 	if k1Again.Key != "key1" {
 		t.Fatalf("expected key1 again, got %v", k1Again)
+	}
+}
+
+func TestPoolManager_RemoveKeyOn401(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
+	pool.SetKeys([]string{"key-valid-1", "key-banned-2", "key-valid-3"})
+
+	removed := pool.RemoveKey("key-banned-2", "401_unauthorized")
+	if !removed {
+		t.Fatalf("expected key-banned-2 to be removed")
+	}
+
+	list, _, _, available, _, banned := pool.Snapshot()
+	if len(list) != 2 {
+		t.Fatalf("expected 2 remaining keys, got %d", len(list))
+	}
+	if available != 2 {
+		t.Fatalf("expected 2 available keys, got %d", available)
+	}
+	if banned != 1 {
+		t.Fatalf("expected 1 banned key count, got %d", banned)
+	}
+
+	for _, ks := range list {
+		if ks.Key == "key-banned-2" {
+			t.Fatalf("banned key still present in pool!")
+		}
+	}
+
+	// 重新加入已被封禁的 Key，验证 banned 计数回退
+	pool.SetKeys([]string{"key-valid-1", "key-banned-2"})
+	_, _, _, _, _, bannedAfterReadd := pool.Snapshot()
+	if bannedAfterReadd != 0 {
+		t.Fatalf("expected 0 banned keys after re-adding, got %d", bannedAfterReadd)
+	}
+}
+
+func TestFastDNSResolver_Cache(t *testing.T) {
+	resolver := NewFastDNSResolver(nil)
+	ctx := context.Background()
+
+	// 模拟直接解析 IP
+	ips, err := resolver.ResolveHost(ctx, "127.0.0.1")
+	if err != nil || len(ips) == 0 || !ips[0].Equal(net.ParseIP("127.0.0.1")) {
+		t.Fatalf("failed to resolve IP directly: %v, %v", ips, err)
+	}
+
+	// 手动塞入缓存测试命中
+	testIP := net.ParseIP("1.2.3.4")
+	resolver.cache.Store("example.com", dnsCacheEntry{
+		ips:     []net.IP{testIP},
+		expires: time.Now().Add(10 * time.Minute),
+	})
+
+	cachedIPs, err := resolver.ResolveHost(ctx, "example.com")
+	if err != nil || len(cachedIPs) == 0 || !cachedIPs[0].Equal(testIP) {
+		t.Fatalf("expected cached IP 1.2.3.4, got %v, err=%v", cachedIPs, err)
 	}
 }
 
@@ -109,15 +199,17 @@ func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	var statusResp struct {
-		TotalKeys int `json:"total_keys"`
+		TotalKeys     int    `json:"total_keys"`
+		AvailableKeys int    `json:"available_keys"`
+		LastUsedKey   string `json:"last_used_key"`
 	}
 	json.NewDecoder(rr.Body).Decode(&statusResp)
-	if statusResp.TotalKeys != 1 {
-		t.Fatalf("expected 1 total key, got %d", statusResp.TotalKeys)
+	if statusResp.TotalKeys != 1 || statusResp.AvailableKeys != 1 {
+		t.Fatalf("expected 1 total & available key, got %v", statusResp)
 	}
 
 	// 3. 测试本地回环 POST /_gateway/keys 热更新号池
-	updateBody := bytes.NewBufferString("new-key1\nnew-key2\nnew-key3")
+	updateBody := bytes.NewBufferString("new-key1#主力\nnew-key2#备用\nnew-key3")
 	postReq := httptest.NewRequest(http.MethodPost, "/_gateway/keys", updateBody)
 	postReq.RemoteAddr = "127.0.0.1:12345"
 	postRR := httptest.NewRecorder()
@@ -128,42 +220,53 @@ func TestGatewayServer_InternalAPIAndHotReload(t *testing.T) {
 	}
 
 	// 重新查看状态，确认已热更新为 3 个 Key
-	list, _ := pool.Snapshot()
+	list, _, _, _, _, _ := pool.Snapshot()
 	if len(list) != 3 {
 		t.Fatalf("expected 3 keys after hot-reload, got %d", len(list))
 	}
 }
 
-func TestGatewayServer_ForwardAndRetryOn429(t *testing.T) {
-	// 启动一个模拟的上游 Agnes 服务器：第 1 个 Key 返回 429，第 2 个 Key 成功
+func TestGatewayServer_RemoveOn401AndRetry(t *testing.T) {
+	// 模拟上游：第一个 Key 返回 401 Unauthorized，第二个 Key 返回 200 OK
 	requestCount := 0
 	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		auth := r.Header.Get("Authorization")
-		if auth == "Bearer fail-key" {
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":{"message":"Rate limit exceeded","type":"requests"}}`))
+		if auth == "Bearer banned-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":{"message":"Invalid key or banned","type":"authentication_error"}}`))
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello from Agnes\"}}]}\n\n"))
 	}))
 	defer upstreamMock.Close()
 
 	pool := NewPoolManager(upstreamMock.URL, 60)
-	pool.SetKeys([]string{"fail-key", "success-key"})
+	pool.SetKeys([]string{"banned-key#被封Key", "valid-key#正常Key"})
 	server := NewGatewayServer(pool, 8080, 2)
 
-	// 发起模拟请求
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-6-astra"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-2.5-flash"}`))
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 after retry, got %d", rr.Code)
+		t.Fatalf("expected 200 after retry on 401, got %d", rr.Code)
 	}
-	if requestCount != 2 {
-		t.Fatalf("expected exactly 2 requests (1 fail + 1 retry), got %d", requestCount)
+
+	// 验证 banned-key 已被从号池中剔除
+	list, _, _, available, _, banned := pool.Snapshot()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 remaining key in pool, got %d", len(list))
+	}
+	if list[0].Key != "valid-key" {
+		t.Fatalf("expected remaining key to be valid-key, got %s", list[0].Key)
+	}
+	if available != 1 {
+		t.Fatalf("expected 1 available key, got %d", available)
+	}
+	if banned != 1 {
+		t.Fatalf("expected 1 banned key count, got %d", banned)
 	}
 }
