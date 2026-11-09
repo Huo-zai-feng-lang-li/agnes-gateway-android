@@ -428,3 +428,132 @@ func TestGatewayServer_RemoveOn401AndRetry(t *testing.T) {
 		t.Fatalf("expected 1 banned key count, got %d", banned)
 	}
 }
+
+func TestPoolManager_ParseRetryAfter(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 30)
+
+	// 纯数字秒数
+	if d := pool.parseRetryAfter("5"); d != 5*time.Second {
+		t.Fatalf("expected 5s, got %v", d)
+	}
+	if d := pool.parseRetryAfter("120"); d != 120*time.Second {
+		t.Fatalf("expected 120s, got %v", d)
+	}
+	// 超出上限 300s
+	if d := pool.parseRetryAfter("600"); d != 300*time.Second {
+		t.Fatalf("expected 300s clamp, got %v", d)
+	}
+	// 空值使用默认 cooldownSec
+	if d := pool.parseRetryAfter(""); d != 30*time.Second {
+		t.Fatalf("expected 30s default, got %v", d)
+	}
+	// 非法字符串使用默认 cooldownSec
+	if d := pool.parseRetryAfter("invalid"); d != 30*time.Second {
+		t.Fatalf("expected 30s default on invalid, got %v", d)
+	}
+}
+
+func TestPoolManager_AvailableAndTotalCount(t *testing.T) {
+	pool := NewPoolManager("https://apihub.agnes-ai.cn", 30)
+	pool.SetKeys([]string{"k1", "k2", "k3"})
+
+	if pool.TotalCount() != 3 {
+		t.Fatalf("expected 3 total keys, got %d", pool.TotalCount())
+	}
+	if pool.AvailableCount() != 3 || !pool.HasAvailableKeys() {
+		t.Fatalf("expected 3 available keys, got %d", pool.AvailableCount())
+	}
+
+	k1, _ := pool.PickNext()
+	pool.MarkCooldown(k1, "429_rate_limit", 1*time.Minute)
+
+	if pool.TotalCount() != 3 {
+		t.Fatalf("total keys should still be 3, got %d", pool.TotalCount())
+	}
+	if pool.AvailableCount() != 2 {
+		t.Fatalf("available keys should be 2, got %d", pool.AvailableCount())
+	}
+
+	pool.RemoveKey("k2", "401_unauthorized")
+	if pool.TotalCount() != 2 {
+		t.Fatalf("total keys after remove should be 2, got %d", pool.TotalCount())
+	}
+	if pool.AvailableCount() != 1 {
+		t.Fatalf("available keys should be 1, got %d", pool.AvailableCount())
+	}
+}
+
+func TestGatewayServer_429FastFailover(t *testing.T) {
+	// 模拟上游：第一个 Key 返回 429 速率限制（带 Retry-After: 5），第二个 Key 立即返回 200
+	reqCount := 0
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		auth := r.Header.Get("Authorization")
+		if auth == "Bearer rate-limited-key" {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"Rate limit exceeded","type":"requests"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n"))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 30)
+	pool.SetKeys([]string{"rate-limited-key#限流号", "healthy-key#正常号"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash","stream":true}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after 429 failover, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	if reqCount != 2 {
+		t.Fatalf("expected exactly 2 upstream requests (1 failed 429 + 1 success), got %d", reqCount)
+	}
+
+	// 确认限流号进入冷却，而正常号仍然可用
+	if pool.AvailableCount() != 1 {
+		t.Fatalf("expected 1 available key remaining, got %d", pool.AvailableCount())
+	}
+}
+
+func TestGatewayServer_StreamingTimeoutFastFailover(t *testing.T) {
+	// 模拟上游：第一个 Key hang 阻塞等待，第二个 Key 立即返回 200
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "Bearer slow-key" {
+			// 慢 Key 阻塞 250ms
+			time.Sleep(250 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("slow response"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: fast\n\n"))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 30)
+	pool.SetKeys([]string{"slow-key#慢号", "fast-key#快号"})
+	server := NewGatewayServer(pool, 8080, 2)
+	// 将流式超时临时调整为 60ms 以供单测极速验证
+	server.streamTransport.ResponseHeaderTimeout = 60 * time.Millisecond
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash","stream":true}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after streaming timeout failover, got %d", rr.Code)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("fast")) {
+		t.Fatalf("expected fast key response, got: %s", rr.Body.String())
+	}
+}
+

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,6 +134,17 @@ func extractModelName(body []byte) string {
 		return ""
 	}
 	return probe.Model
+}
+
+func isStreamRequest(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var probe struct {
+		Stream bool `json:"stream"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	return probe.Stream
 }
 
 func NewPoolManager(upstream string, cooldownSec int) *PoolManager {
@@ -265,10 +277,68 @@ func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time
 	dead := p.allUnavailableLocked(time.Now())
 	disp := ks.DisplayName
 	p.mu.Unlock()
-	log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
+
+	// 精准输出日志：严格区分真实 429 限流 vs 网络超时/异常避让
+	if strings.Contains(errReason, "429") || strings.Contains(errReason, "rate_limit") {
+		log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
+	} else if strings.Contains(errReason, "timeout") || strings.Contains(errReason, "deadline") {
+		log.Printf("%s [避让] 响应超时 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
+	} else {
+		log.Printf("%s [避让] 连接异常故障 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
+	}
+
 	if dead {
 		logAllUnavailable()
 	}
+}
+
+// TotalCount 返回号池中当前的 Key 总数
+func (p *PoolManager) TotalCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.keys)
+}
+
+// AvailableCount 返回当前未处于冷却或禁用状态的可用 Key 数量
+func (p *PoolManager) AvailableCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	count := 0
+	for _, ks := range p.keys {
+		if !ks.Disabled && !now.Before(ks.CooldownTill) {
+			count++
+		}
+	}
+	return count
+}
+
+// HasAvailableKeys 判断当前是否至少有一个可用 Key
+func (p *PoolManager) HasAvailableKeys() bool {
+	return p.AvailableCount() > 0
+}
+
+// parseRetryAfter 解析上游 429 返回的 Retry-After 响应头
+func (p *PoolManager) parseRetryAfter(header string) time.Duration {
+	header = strings.TrimSpace(header)
+	if header != "" {
+		if sec, err := strconv.Atoi(header); err == nil && sec > 0 {
+			if sec > 300 {
+				sec = 300
+			}
+			return time.Duration(sec) * time.Second
+		}
+		if t, err := http.ParseTime(header); err == nil {
+			d := time.Until(t)
+			if d > 0 {
+				if d > 300*time.Second {
+					d = 300 * time.Second
+				}
+				return d
+			}
+		}
+	}
+	return time.Duration(p.cooldownSec) * time.Second
 }
 
 // displayNameOf 在锁保护下读取 Key 展示名，避免与 SetKeys 并发写入构成数据竞争
@@ -531,19 +601,17 @@ func normalizeDNSServer(raw string) (string, bool) {
 
 // GatewayServer 反代网关
 type GatewayServer struct {
-	pool       *PoolManager
-	client     *http.Client
-	listenAddr string
-	maxRetries int
+	pool              *PoolManager
+	standardTransport *http.Transport
+	streamTransport   *http.Transport
+	standardClient    *http.Client
+	streamClient      *http.Client
+	listenAddr        string
+	maxRetries        int
 }
 
-func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServer {
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-
-	// 极速上游长连接传输层（预热复用 + Keep-Alive + 内存缓存 DNS）
-	transport := &http.Transport{
+func createGatewayTransport(responseHeaderTimeout time.Duration) *http.Transport {
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
@@ -577,19 +645,60 @@ func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServe
 		MaxIdleConnsPerHost:   30,
 		IdleConnTimeout:       120 * time.Second,
 		TLSHandshakeTimeout:   4 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+}
+
+func NewGatewayServer(pool *PoolManager, port int, maxRetries int) *GatewayServer {
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
+	stdTransport := createGatewayTransport(60 * time.Second)
+	// 流式请求首字延迟保障：12s 未拿到 Header 则判定上游该 Key 假死，触发极速切号
+	streamTransport := createGatewayTransport(12 * time.Second)
 
 	return &GatewayServer{
-		pool: pool,
-		client: &http.Client{
-			Transport: transport,
-			Timeout:   0, // 流式长响应不设全局超时
+		pool:              pool,
+		standardTransport: stdTransport,
+		streamTransport:   streamTransport,
+		standardClient: &http.Client{
+			Transport: stdTransport,
+			Timeout:   0,
+		},
+		streamClient: &http.Client{
+			Transport: streamTransport,
+			Timeout:   0,
 		},
 		listenAddr: fmt.Sprintf("0.0.0.0:%d", port),
 		maxRetries: maxRetries,
 	}
+}
+
+func (s *GatewayServer) closeIdleConnections() {
+	if s.standardTransport != nil {
+		s.standardTransport.CloseIdleConnections()
+	}
+	if s.streamTransport != nil {
+		s.streamTransport.CloseIdleConnections()
+	}
+}
+
+// WarmUp 预热网络链路（DNS 缓存、TCP 与 TLS 握手保活），消除首字冷启动延迟
+func (s *GatewayServer) WarmUp() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.pool.upstreamURL+"/models", nil)
+		if err == nil {
+			resp, doErr := s.standardClient.Do(req)
+			if doErr == nil {
+				io.CopyN(io.Discard, resp.Body, 512)
+				resp.Body.Close()
+			}
+		}
+	}()
 }
 
 func (s *GatewayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -692,17 +801,30 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		reqModel = "models"
 	}
 
+	isStream := isStreamRequest(reqBody) || strings.Contains(r.Header.Get("Accept"), "text/event-stream")
+
+	// 动态计算本次请求的最大尝试次数：号池中当前有多少 Key 就至少试多少次
+	// 绝不在还有健康可用 Key 时因固定重试次数上限而过早放弃
+	totalPoolKeys := s.pool.TotalCount()
+	maxAttempts := totalPoolKeys
+	if maxAttempts < s.maxRetries {
+		maxAttempts = s.maxRetries
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+
 	var lastStatusCode int
 	var lastErrBody []byte
 
-	for attempt := 0; attempt < s.maxRetries; attempt++ {
-		keyState, totalKeys := s.pool.PickNext()
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		keyState, poolTotal := s.pool.PickNext()
 		if keyState == nil {
 			logAllUnavailable()
-			if totalKeys > 0 {
+			if poolTotal > 0 {
 				// 全冷却：立即 503，让调用方马上知道该等，而不是干等一次注定 429 的上游往返
 				w.Header().Set("Retry-After", "30")
-				http.Error(w, fmt.Sprintf(`{"error":{"message":"Agnes 号池当前全部处于冷却中（共 %d 个 Key），请稍后重试","type":"gateway_pool_cooldown"}}`, totalKeys), http.StatusServiceUnavailable)
+				http.Error(w, fmt.Sprintf(`{"error":{"message":"Agnes 号池当前全部处于冷却中（共 %d 个 Key），请稍后重试","type":"gateway_pool_cooldown"}}`, poolTotal), http.StatusServiceUnavailable)
 			} else {
 				http.Error(w, `{"error":{"message":"Agnes 号池为空，请先配置 API Key","type":"gateway_pool_empty"}}`, http.StatusServiceUnavailable)
 			}
@@ -728,34 +850,67 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		outReq.Header.Set("Authorization", "Bearer "+keyState.Key)
 
+		// 挑选合适的传输客户端：多 Key 流式请求走 12s 极速超时保障；单 Key 或非流式走标准客户端
+		client := s.standardClient
+		if isStream && poolTotal > 1 {
+			client = s.streamClient
+		}
+
 		// 记录发起单次上游调用的精准耗时（首字时间 TTFB）
 		subStart := time.Now()
-		resp, reqErr := s.client.Do(outReq)
+		resp, reqErr := client.Do(outReq)
 		ttfbSec := time.Since(subStart).Seconds()
 
 		if reqErr != nil {
-			// 客户端主动断开/超时导致 ctx 取消，不是 Key 的问题，不能冷却号池
-			if errors.Is(reqErr, context.Canceled) || errors.Is(reqErr, context.DeadlineExceeded) {
+			// 1. 客户端主动断开/超时导致 ctx 取消，不是 Key 的问题，不能冷却号池
+			if errors.Is(reqErr, context.Canceled) || (errors.Is(reqErr, context.DeadlineExceeded) && r.Context().Err() != nil) {
 				log.Printf("%s [中断] 客户端断开 (%.2fs) | Key: %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
 				return
 			}
+
+			// 发生连接层故障时，主动释放空闲连接，防止亚健康 HTTP/2 连接污染下一次切号
+			s.closeIdleConnections()
+
+			// 2. 首字等待超时（判定上游该 Key 响应慢或假死）
+			isTimeout := errors.Is(reqErr, context.DeadlineExceeded) ||
+				strings.Contains(reqErr.Error(), "timeout") ||
+				strings.Contains(reqErr.Error(), "Timeout") ||
+				strings.Contains(reqErr.Error(), "deadline")
+
+			if isTimeout {
+				log.Printf("%s [超时] 响应等待超时 (%.2fs) | Key: %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
+				s.pool.MarkCooldown(keyState, "timeout_awaiting_headers", 15*time.Second)
+				if s.pool.HasAvailableKeys() {
+					log.Printf("%s [切号] Key: %s 响应超时，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+					continue
+				}
+				http.Error(w, fmt.Sprintf(`{"error":{"message":"上游响应超时 (%.2fs): %v","type":"upstream_timeout"}}`, ttfbSec, reqErr), http.StatusGatewayTimeout)
+				return
+			}
+
+			// 3. 网络连接异常
 			log.Printf("%s [失败] 连接异常 (%.2fs) | Key: %s | %v", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState), reqErr)
-			s.pool.MarkCooldown(keyState, reqErr.Error(), 30*time.Second)
-			if totalKeys > 1 {
+			s.pool.MarkCooldown(keyState, reqErr.Error(), 15*time.Second)
+			if s.pool.HasAvailableKeys() {
+				log.Printf("%s [切号] Key: %s 连接异常，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			http.Error(w, fmt.Sprintf(`{"error":{"message":"连接 Agnes 上游失败: %v","type":"upstream_connect_error"}}`, reqErr), http.StatusBadGateway)
 			return
 		}
 
-		// 针对 429 速率限制退避重试 (30 秒冷却)
+		// 针对 429 速率限制退避重试 (优先解析 Retry-After 头部)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			errBytes, _ := io.ReadAll(resp.Body)
+			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			s.pool.MarkCooldown(keyState, "429_rate_limit", 30*time.Second)
-			if totalKeys > 1 {
+
+			retryDuration := s.pool.parseRetryAfter(resp.Header.Get("Retry-After"))
+			s.pool.MarkCooldown(keyState, "429_rate_limit", retryDuration)
+
+			if s.pool.HasAvailableKeys() {
+				log.Printf("%s [切号] Key: %s 触发限流，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -764,27 +919,31 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		// 针对 401 凭证无效（失效）直接从号池彻底移除
 		if resp.StatusCode == http.StatusUnauthorized {
-			errBytes, _ := io.ReadAll(resp.Body)
+			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
 			s.pool.RemoveKey(keyState.Key, "401_unauthorized")
-			if totalKeys > 1 {
+
+			if s.pool.HasAvailableKeys() {
+				log.Printf("%s [切号] Key: %s 凭证失效(401)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
 			return
 		}
 
-		// 针对 5xx 临时错误重试 (15 秒冷却)
+		// 针对 5xx 临时错误重试 (15 秒避让)
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			errBytes, _ := io.ReadAll(resp.Body)
+			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
 			log.Printf("%s [失败] HTTP %d (%.2fs) | Key: %s", formatLogTime(), resp.StatusCode, ttfbSec, s.pool.displayNameOf(keyState))
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
-			if totalKeys > 1 {
+
+			if s.pool.HasAvailableKeys() {
+				log.Printf("%s [切号] 上游服务异常(%d)，立即切换至下一 Key", formatLogTime(), resp.StatusCode)
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -920,6 +1079,7 @@ func main() {
 	pool.SetKeys(initialKeys)
 
 	server := NewGatewayServer(pool, *port, *retries)
+	server.WarmUp()
 	httpServer := &http.Server{
 		Addr:    server.listenAddr,
 		Handler: server,

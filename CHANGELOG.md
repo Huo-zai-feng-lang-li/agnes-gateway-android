@@ -2,6 +2,20 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.11] - 2026-11-09
+
+### 性能与优化
+- **限流极速切号与全池重试**：
+  - 动态计算重试次数：单次请求的最大尝试次数自动适配号池中现有的 Key 总数，只要号池中仍有健康未冷却的 Key，就绝不因静态重试阈值而提前报错放弃。
+  - 动态 `Retry-After` 智能适配：精准解析上游 429 响应头中的 `Retry-After`，按上游指定秒数精准冷却，不再僵化锁定 30 秒。
+- **流式首字延迟保障（TTFB）与假死切号**：
+  - **双 Client 传输层隔离**：针对流式长请求（`stream: true`）提供独立传输客户端，设定 12s 响应头超时阈值；当检测到某个 Key 首字卡死，毫秒级标记避让并瞬间切换至下一可用 Key，彻底根治客户端漫长等待与超时。
+  - **连接池自愈清理**：连接发生超时或异常切号时，主动释放底层空闲连接（`CloseIdleConnections`），避免亚健康 HTTP/2 复用连带污染下一个 Key。
+  - **网络链路预热（WarmUp）**：网关启动时自动后台预热上游 DNS 解析与 TLS 握手长连接，消灭首次调用的冷启动延迟。
+- **日志语义精确度与高亮引擎强化**：
+  - 严格区分 429 限流（`[限流]`）、首字超时（`[超时]`）、网络异常（`[避让]`）、极速切换（`[切号]`）与客户端断开（`[中断]`）。
+  - 运维界面日志渲染引擎同步支持 `[超时]`、`[避让]`、`[切号]`、`[中断]` 专属行内高亮与分色。
+
 ## [v1.0.10] - 2026-11-08
 
 ### 修复
@@ -151,6 +165,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.11]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.8

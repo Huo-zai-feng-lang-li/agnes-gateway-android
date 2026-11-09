@@ -87,10 +87,20 @@
     - 影响范围：v1.0.8 引入该正则，v1.0.8 / v1.0.9 均会闪退；v1.0.7 不受影响。
     - 版本递增至 **versionCode 11 / versionName 1.0.10**。
 
+31. **v1.0.11：极速反代网关性能优化（429限流极速切号 + 流式首字延迟TTFB保障）**
+    - **全号池动态重试覆盖**：重试尝试次数 `maxAttempts` 动态自动适配号池 Key 总数（`max(len(keys), maxRetries)`），只要池中还有未冷却的可用 Key，绝不提前返回失败。
+    - **Retry-After 智能解析**：精准解析上游 429 响应头中的 `Retry-After`（支持秒数与 HTTP 时间，300s 钳位），避免固化的长冷却。
+    - **双 Client 传输层隔离与首字超时切号**：为流式长请求（`stream: true`）配备专属 `streamClient`（12s 响应头超时）。只要上游首字响应超过 12s 立即判定该 Key 假死，毫秒级标记避让并极速切号，根治客户端长等待。
+    - **底层连接池自愈清理**：连接发生超时或异常切号时，主动执行 `CloseIdleConnections`，防止亚健康 HTTP/2 损坏连接被下一个 Key 复用污染。
+    - **网关启动预热（WarmUp）**：网关启动时自动后台预热上游 `/models` 连接，消除首字冷启动延迟。
+    - **精准日志语义与 UI 高亮渲染**：严格区分 `[限流]`、`[超时]`、`[避让]`、`[切号]`、`[中断]`；Android 端日志高亮引擎全面适配。
+    - 单元测试全量绿灯通过（新增 4 个针对 429 切号、流式首字超时切号、Retry-After 解析、可用号统计测试）。
+    - 版本遵循禁止包含数字 4 规则，递增至 **versionCode 12 / versionName 1.0.11**。
+
 ## 未完成 / 下一步
-- 无待办。当前最新版本 v1.0.10。
-- 后续发版按 .agents/rules/README.md 流程执行（版本号禁含 4）。
-- 后续发版流程：改版本号 → 更新 CHANGELOG → 提交 push main → `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`。
+- 当前最新版本 v1.0.11。
+- 准备打 tag `v1.0.11` 并推送。
+- 发版后核对 Release 资产名与版本号一致。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）
