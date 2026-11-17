@@ -116,7 +116,9 @@
     - 版本递增至 **versionCode 14 / versionName 1.0.13**；arm64 与 jniLibs SHA256 = `13AC18D443988C72CCBAE49C7860905D3A46B7CFB2F65855E25FCC60CB964768`（两侧一致）。
 
 ## 未完成 / 下一步
-- v1.0.13 代码已改完，待提交、交叉编译 arm64、同步 jniLibs、推送 main、打 tag v1.0.13 并由 GitHub Actions 发布 Release。
+- v1.0.13 已提交（a2f62ba）、推送 main、打 tag v1.0.13；CI 44097012997（main）与 44097469886（tag）均 success。
+- Release：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
+- Release 资产：`AgnesGateway-v1.0.13.apk`（7,166,056 B，sha256 `417baf850df9a5f407c7089ea64f0a381562955ac229041a613408b200ea0207`）。
 - 用户侧：安装 v1.0.13 覆盖升级；旧配置里的 `#备注` 会自动剥离。
 
 ## 关键文件
