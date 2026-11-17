@@ -820,7 +820,7 @@ class MainActivity : AppCompatActivity() {
         tvLogs.text = SpannableStringBuilder(logStringBuilder)
     }
 
-    // 根据简化精简后的日志结构进行行内局部高亮：时间戳灰、状态彩色加粗、耗时高亮、模型浅紫、Key青色
+    // 根据简化精简后的日志结构进行行内局部高亮：时间戳灰、状态彩色加粗、耗时高亮、模型浅紫
     private fun colorizeLog(msg: String): Spannable {
         val sp = SpannableStringBuilder(msg)
 
@@ -877,19 +877,11 @@ class MainActivity : AppCompatActivity() {
             sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
-        // 4. 模型名高亮 ( | agnes-xxx | )
+        // 4. 模型名高亮 ( | A3F | )
         PATTERN_MODEL.findAll(msg).forEach {
             val start = it.range.first + 1
             val end = it.range.last
             sp.setSpan(ForegroundColorSpan(0xFFBC8CFF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-
-        // 5. Key 高亮 (Key: xxx)
-        PATTERN_KEY.findAll(msg).forEach {
-            val start = it.range.first
-            val end = it.range.last + 1
-            sp.setSpan(ForegroundColorSpan(0xFF00E5FF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
@@ -1053,8 +1045,7 @@ class MainActivity : AppCompatActivity() {
         private val PATTERN_TAG_2XX = Regex("""\[2\d{2}\]""")
         private val PATTERN_TAG_ERR = Regex("""\[[45]\d{2}\]""")
         private val PATTERN_TTFB = Regex("""\b\d+\.\d{2}s\b""")
-        private val PATTERN_MODEL = Regex("""\|\s*([a-zA-Z0-9._-]+)\s*\|""")
+        private val PATTERN_MODEL = Regex("""\|\s*((?:A\d+(?:\.\d+)*[A-Z]*|default|models))\s*\|""")
         // 注意：字符类里的 "-" 必须放在末尾，否则 "|->" 会被解析成非法区间 (\u007C..\u003E) 导致类初始化崩溃
-        private val PATTERN_KEY = Regex("""Key:\s*([^\s|>-]+)""")
     }
 }

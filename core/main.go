@@ -84,6 +84,41 @@ func readUpstreamError(body io.Reader) []byte {
 	return b
 }
 
+// agnesModelPattern 匹配 agnes-<版本>[-<能力后缀>] 形式的模型名。
+var agnesModelPattern = regexp.MustCompile(`(?i)^agnes-([0-9]+(?:\.[0-9]+)*)(?:-(.+))?$`)
+
+// shortModelName 将 Agnes 模型名压缩成日志简写：agnes-3.0-flash -> A3F，
+// agnes-2.5-flash -> A2.5F，agnes-3.0-pro -> A3P；非 Agnes 模型保持原名。
+func shortModelName(model string) string {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return "default"
+	}
+	matches := agnesModelPattern.FindStringSubmatch(trimmed)
+	if matches == nil {
+		return sanitizeLogField(trimmed)
+	}
+	version := strings.TrimSuffix(matches[1], ".0")
+	suffix := ""
+	if len(matches) > 2 {
+		for _, part := range strings.Split(matches[2], "-") {
+			if part == "" {
+				continue
+			}
+			suffix += strings.ToUpper(part[:1])
+		}
+	}
+	return "A" + version + suffix
+}
+
+// estimateCharCount 按 UTF-8 中文常见的 3 字节/字粗略估算内容字数。
+func estimateCharCount(bytes int64) int64 {
+	if bytes <= 0 {
+		return 0
+	}
+	return bytes / 3
+}
+
 // formatByteSize 将字节数转成人能直观看懂的单位（B / KB / MB / GB）。
 func formatByteSize(n int64) string {
 	if n < 1024 {
@@ -178,15 +213,15 @@ func parseKeyEntry(raw string) string {
 	return raw
 }
 
-// formatKeyDisplayName 只保留 Key 末尾 4 位掩码，不再展示任何备注名
+// formatKeyDisplayName 只保留 Key 末尾 4 位，不再展示省略号或备注名。
 func formatKeyDisplayName(key string) (string, string) {
 	key = strings.TrimSpace(key)
 	var masked string
 	if len(key) <= 8 {
 		masked = "******"
 	} else {
-		// 截取末尾 4 个字符，如 ...piLR
-		masked = "..." + key[len(key)-4:]
+		// 只保留末尾 4 位，如 piLR
+		masked = key[len(key)-4:]
 	}
 	return masked, masked
 }
@@ -365,13 +400,13 @@ func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time
 
 	// 精准输出日志：严格区分真实 429 限流 vs 网络超时/异常避让 vs 上游 403
 	if strings.Contains(errReason, "429") || strings.Contains(errReason, "rate_limit") {
-		log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
+		log.Printf("%s [限流] 429 速率限制 | %s -> 冷却 %v", formatLogTime(), disp, duration)
 	} else if strings.Contains(errReason, "timeout") || strings.Contains(errReason, "deadline") {
-		log.Printf("%s [避让] 响应超时 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
+		log.Printf("%s [避让] 响应超时 | %s -> 避让 %v", formatLogTime(), disp, duration)
 	} else if strings.Contains(errReason, "403") {
-		log.Printf("%s [拒绝] 上游 403 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
+		log.Printf("%s [拒绝] 上游 403 | %s -> 冷却 %v", formatLogTime(), disp, duration)
 	} else {
-		log.Printf("%s [避让] 连接异常故障 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
+		log.Printf("%s [避让] 连接异常故障 | %s -> 避让 %v", formatLogTime(), disp, duration)
 	}
 
 	if dead {
@@ -459,7 +494,7 @@ func (p *PoolManager) RemoveKey(key string, errReason string) bool {
 		if strings.Contains(errReason, "403") {
 			detail = "403 风控封禁"
 		}
-		log.Printf("%s [封禁] %s | Key: %s -> 已从号池剔除", formatLogTime(), detail, targetDisp)
+		log.Printf("%s [封禁] %s | %s -> 已从号池剔除", formatLogTime(), detail, targetDisp)
 		if p.allUnavailableLocked(time.Now()) {
 			logAllUnavailable()
 		}
@@ -907,6 +942,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 	clientHost = sanitizeLogField(clientHost)
 	logPath := sanitizeLogField(r.URL.Path)
 	reqStart := time.Now()
+	modelPart = shortModelName(modelPart)
 	log.Printf("%s [请求] %s %s | %s | stream=%v | from=%s",
 		formatLogTime(), r.Method, logPath, modelPart, isStream, clientHost)
 
@@ -971,7 +1007,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		if reqErr != nil {
 			// 1. 客户端主动断开/超时导致 ctx 取消，不是 Key 的问题，不能冷却号池
 			if errors.Is(reqErr, context.Canceled) || (errors.Is(reqErr, context.DeadlineExceeded) && r.Context().Err() != nil) {
-				log.Printf("%s [中断] 客户端断开 (%.2fs) | Key: %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
+				log.Printf("%s [中断] 客户端断开 (%.2fs) | %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
 				return
 			}
 
@@ -985,10 +1021,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 				strings.Contains(reqErr.Error(), "deadline")
 
 			if isTimeout {
-				log.Printf("%s [超时] 响应等待超时 (%.2fs) | Key: %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
+				log.Printf("%s [超时] 响应等待超时 (%.2fs) | %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
 				s.pool.MarkCooldown(keyState, "timeout_awaiting_headers", 15*time.Second)
 				if s.pool.HasAvailableKeys() {
-					log.Printf("%s [切号] Key: %s 响应超时，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+					log.Printf("%s [切号] %s 响应超时，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 					continue
 				}
 				http.Error(w, fmt.Sprintf(`{"error":{"message":"上游响应超时 (%.2fs): %v","type":"upstream_timeout"}}`, ttfbSec, reqErr), http.StatusGatewayTimeout)
@@ -996,10 +1032,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// 3. 网络连接异常
-			log.Printf("%s [失败] 连接异常 (%.2fs) | Key: %s | %v", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState), reqErr)
+			log.Printf("%s [失败] 连接异常 (%.2fs) | %s | %v", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState), reqErr)
 			s.pool.MarkCooldown(keyState, reqErr.Error(), 15*time.Second)
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] Key: %s 连接异常，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				log.Printf("%s [切号] %s 连接异常，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			http.Error(w, fmt.Sprintf(`{"error":{"message":"连接 Agnes 上游失败: %v","type":"upstream_connect_error"}}`, reqErr), http.StatusBadGateway)
@@ -1017,7 +1053,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			s.pool.MarkCooldown(keyState, "429_rate_limit", retryDuration)
 
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] Key: %s 触发限流，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				log.Printf("%s [切号] %s 触发限流，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1033,7 +1069,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			s.pool.RemoveKey(keyState.Key, "401_unauthorized")
 
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] Key: %s 凭证失效(401)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				log.Printf("%s [切号] %s 凭证失效(401)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1059,11 +1095,11 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			// 与 401 一样直接剔除号池并触发客户端本地清理，避免长任务反复选中死号。
 			if reason == "403_risk_control" {
 				disp := s.pool.displayNameOf(keyState)
-				log.Printf("%s [风控] HTTP 403 (%.2fs) | %s | Key: %s | 已封禁 | %s",
+				log.Printf("%s [风控] HTTP 403 (%.2fs) | %s | %s | 已封禁 | %s",
 					formatLogTime(), ttfbSec, modelPart, disp, sanitizeUpstreamBody(errBytes))
 				s.pool.RemoveKey(keyState.Key, reason)
 				if s.pool.HasAvailableKeys() {
-					log.Printf("%s [切号] Key: %s 已被上游封禁，立即切换至下一 Key", formatLogTime(), disp)
+					log.Printf("%s [切号] %s 已被上游封禁，立即切换至下一 Key", formatLogTime(), disp)
 					continue
 				}
 				s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1072,13 +1108,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 			// 额度、模型权限、网段等 403 仍按 Key 级冷却处理，冷却后再观察是否恢复
 			dead := s.pool.applyCooldown(keyState, reason, cooldown)
-			log.Printf("%s [%s] HTTP 403 (%.2fs) | %s | Key: %s | 冷却 %v | %s",
+			log.Printf("%s [%s] HTTP 403 (%.2fs) | %s | %s | 冷却 %v | %s",
 				formatLogTime(), tag, ttfbSec, modelPart, s.pool.displayNameOf(keyState), cooldown, sanitizeUpstreamBody(errBytes))
 			if dead {
 				logAllUnavailable()
 			}
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] Key: %s 被上游拒绝(403)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				log.Printf("%s [切号] %s 被上游拒绝(403)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1092,7 +1128,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | Key: %s | %s",
+			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | %s | %s",
 				formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), sanitizeUpstreamBody(errBytes))
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
 			return
@@ -1104,7 +1140,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | Key: %s | %s",
+			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | %s | %s",
 				formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), sanitizeUpstreamBody(errBytes))
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 
@@ -1137,7 +1173,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		// 响应头一到就记「成功」，保证每次 2xx 调用都有迹可查；
 		// 后续正文若断流/客户端断开，再追加 [断流] / [中断] 说明结果。
-		log.Printf("%s [成功] HTTP %d %.2fs | %s | Key: %s | stream=%v",
+		log.Printf("%s [成功] HTTP %d %.2fs | %s | %s | stream=%v",
 			formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), isSSE)
 
 		flusher, isFlusher := w.(http.Flusher)
@@ -1147,8 +1183,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-r.Context().Done():
-				log.Printf("%s [中断] 客户端断开 (%.2fs, 下发 %s) | %s | Key: %s",
-					formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState))
+				log.Printf("%s [中断] 客户端断开 (%.2fs, 下发 %s · 约 %d 字) | %s | %s",
+					formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState))
 				io.CopyN(io.Discard, resp.Body, 64*1024)
 				return
 			default:
@@ -1157,8 +1193,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
 				if _, wErr := w.Write(buf[:n]); wErr != nil {
-					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %s) | %s | Key: %s | %v",
-						formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState), wErr)
+					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",
+						formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState), wErr)
 					io.CopyN(io.Discard, resp.Body, 64*1024)
 					return
 				}
@@ -1176,13 +1212,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		elapsedSec := time.Since(reqStart).Seconds()
 		if readErr == io.EOF {
 			if isSSE {
-				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %s) | %s | Key: %s",
-					formatLogTime(), elapsedSec, formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState))
+				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %s · 约 %d 字) | %s | %s",
+					formatLogTime(), elapsedSec, formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState))
 			}
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
-			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s) | %s | Key: %s | %v",
-				formatLogTime(), elapsedSec, formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState), readErr)
+			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",
+				formatLogTime(), elapsedSec, formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState), readErr)
 		}
 		return
 	}

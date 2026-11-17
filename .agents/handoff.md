@@ -123,7 +123,15 @@
     - 新增字节格式化单测；`go test -count=1 ./...` 与 `go vet ./...` 通过。
     - 版本递增至 **versionCode 15 / versionName 1.0.15**。
 
+35. **v1.0.16：模型简写、Key 尾号与预估字数**
+    - Go 新增 `shortModelName`：`agnes-3.0-flash -> A3F`、`agnes-2.5-flash -> A2.5F`、`agnes-3.0-pro -> A3P`，非 Agnes 模型保持原名。
+    - Key 展示只保留末尾 4 位（`piLR`、`IhIM`），去掉 `Key: ...` 与省略号；号池面板同步。
+    - Go 新增 `estimateCharCount`：`[完成]/[断流]/[中断]` 追加 `· 约 N 字`，按 UTF-8 中文 3 B/字估算。
+    - 新增 `shortModelName`、`estimateCharCount` 单测；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+    - 版本递增至 **versionCode 16 / versionName 1.0.16**。
+
 ## 未完成 / 下一步
+- v1.0.16 代码已改完，待交叉编译 arm64、同步 jniLibs、提交、推送 main、打 tag v1.0.16 并由 GitHub Actions 发布 Release。
 - v1.0.15 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
 - Release 资产：`AgnesGateway-v1.0.15.apk`（7,168,884 B，sha256 `29C18618F161430A01E14A3EE2236C51D5342CE6292F826E839F95B68951058E`）。
 - 待用户在真机验收：顶部水波纹+运行时长、`[成功]/[完成]` 分色、`下发 KB/MB` 显示。

@@ -12,6 +12,45 @@ import (
 	"time"
 )
 
+func TestShortModelName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"agnes-3.0-flash", "A3F"},
+		{"agnes-2.5-flash", "A2.5F"},
+		{"agnes-3.0-pro", "A3P"},
+		{"AGNES-3.0-FLASH", "A3F"},
+		{"agnes-3.0-flash-preview", "A3FP"},
+		{"agnes-3.0", "A3"},
+		{"models", "models"},
+		{"", "default"},
+		{"gpt-4o", "gpt-4o"},
+	}
+	for _, c := range cases {
+		if got := shortModelName(c.in); got != c.want {
+			t.Fatalf("shortModelName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestEstimateCharCount(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want int64
+	}{
+		{0, 0},
+		{1024, 341},
+		{1874, 624},
+		{6844, 2281},
+	}
+	for _, c := range cases {
+		if got := estimateCharCount(c.in); got != c.want {
+			t.Fatalf("estimateCharCount(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestFormatByteSize(t *testing.T) {
 	cases := []struct {
 		in   int64
@@ -51,7 +90,7 @@ func TestPoolManager_NormalizationAndMask(t *testing.T) {
 		t.Fatalf("expected 2 available keys, got %d", available)
 	}
 
-	if list[0].MaskedKey != "...cdef" {
+	if list[0].MaskedKey != "cdef" {
 		t.Fatalf("unexpected masked key: %s", list[0].MaskedKey)
 	}
 	if list[1].MaskedKey != "******" {
@@ -73,7 +112,7 @@ func TestPoolManager_KeySuffixIgnored(t *testing.T) {
 		t.Fatalf("expected 4 keys, got %d", len(list))
 	}
 
-	want := []string{"...cdef", "...dcba", "...7890", "...5678"}
+	want := []string{"cdef", "dcba", "7890", "5678"}
 	for i, w := range want {
 		if list[i].DisplayName != w {
 			t.Fatalf("key %d display mismatch: got %q, want %q", i, list[i].DisplayName, w)

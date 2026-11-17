@@ -2,6 +2,25 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.16] - 2026-11-17
+
+### 优化
+- **模型名日志简写**：`agnes-3.0-flash` 显示为 `A3F`，`agnes-2.5-flash` 显示为 `A2.5F`，`agnes-3.0-pro` 显示为 `A3P`；多段后缀取首字母，如 `agnes-3.0-flash-preview` 显示为 `A3FP`。
+- 非 Agnes 模型（如 `gpt-4o`）保持原名，空模型继续显示 `default`；日志高亮同步适配简写。
+
+### 验证
+- 新增 `shortModelName` 单测，覆盖大小写、2.5 版本、多段后缀、非 Agnes 模型与空值；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+
+## [v1.0.16] - 2026-11-17
+
+### 优化
+- **模型名简写**：日志中的 `agnes-3.0-flash` 显示为 `A3F`，`agnes-2.5-flash` 显示为 `A2.5F`，`agnes-3.0-pro` 显示为 `A3P`；非 Agnes 模型保持原名。
+- **Key 只留后四位**：去掉 `Key: ...` 前缀与省略号，日志只显示 `piLR`、`IhIM` 这样的尾号；号池面板与当前 Key 同步精简。
+- **预估字数**：`[完成]/[断流]/[中断]` 在 `下发 1.8 KB` 后追加 `· 约 624 字`，按 UTF-8 中文 3 字节/字粗略估算。
+
+### 验证
+- 新增 `shortModelName`、`estimateCharCount` 单测；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+
 ## [v1.0.15] - 2026-11-17
 
 ### 优化
@@ -211,6 +230,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.16]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.16
 [v1.0.15]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
 [v1.0.13]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
 [v1.0.12]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
