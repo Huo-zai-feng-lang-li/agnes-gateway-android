@@ -20,6 +20,9 @@
 
 ### 验证
 - 新增 `shortModelName`、`estimateCharCount` 单测；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- GitHub Actions：main CI `44110649383` 成功；tag CI `44111310045` 成功并发布 Release。
+- Release APK：`AgnesGateway-v1.0.16.apk`，7,170,460 B，SHA256 `345EFB7727AB6A909D510C03CEC543E53EF6087211A589F8B89328A88C910C36`（本地下载核对一致）。
+- arm64 内核 SHA256：`7BA45C24AF2AE21B8F76BE8759797E12FAA4A1EAC7130CBB2CC8655208E75CCC`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
 
 ## [v1.0.15] - 2026-11-17
 
