@@ -14,7 +14,9 @@
 ### 验证
 - 新增 `TestFormatSuccessLog`，校验两行格式与 KB/字数换算；`go test -count=1 ./...` 与 `go vet ./...` 通过。
 - arm64 内核 SHA256：`637DCB9699AE86603262F38B3A2791D206D83F5E708B8D57559F3C7D86BDD2BA`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
-- GitHub Actions 构建与 Release APK 待发布后回填。
+- GitHub Actions：main CI `44120327725` 成功；tag CI `44120374326` 成功并发布 Release。
+- Release APK：`AgnesGateway-v1.0.20.apk`，7,169,976 B，SHA256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`（本地下载核对一致）。
+- APK 内 `AndroidManifest.xml` 版本名为 `1.0.20`；内嵌内核经字符串核验包含 `首字 ... | 结束 ...` 两行格式，且不再含 `[成功]`。
 
 ## [v1.0.19] - 2026-11-17
 

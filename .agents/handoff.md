@@ -155,7 +155,9 @@
     - 版本递增至 **versionCode 20 / versionName 1.0.20**。
 
 ## 未完成 / 下一步
-- v1.0.20 已改完：成功日志两行、去掉“成功”文字、首字/结束耗时、换号前分隔线；待测试、交叉编译、提交、打 tag v1.0.20 并发布 Release。
+- v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
+- Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
+- v1.0.20 待真机验收：两行成功日志、首字/结束耗时、换号前分隔线、顶部成功动效识别 `[200]`。
 - v1.0.19 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
 - Release 资产：`AgnesGateway-v1.0.19.apk`（7,169,340 B，sha256 `1DCED9026C7C448BB7DABEF405CCAC1876EC6BCB92E83E7C60229BBA994B5398`，本地下载核对一致）。
 - v1.0.19 待真机验收：页面左右 12dp、底部 8dp 留白是否合适。
