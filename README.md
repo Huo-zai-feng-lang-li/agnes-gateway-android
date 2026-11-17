@@ -9,13 +9,14 @@
 
 - **移动网络加速**：利用手机端移动/联通/电信 5G 蜂窝网络的纯净公网 IP 与低延迟出口，跳过机房 IP 限制与劣质 Anycast 路由。
 - **号池负载均衡**：支持批量配置多个 Agnes API Key，自动平滑轮询（Round-Robin）。
+- **403 风控识别与切号**：单个 Key 被上游风控、额度耗尽或模型无权限拒绝时，按类型冷却 10 分钟、30 分钟或 60 秒，并**无感切换到下一个可用 Key**，不再把 403 透传给客户端。
 - **429 智能退避与自愈**：单个 Key 遭遇 429 限流时自动冷却（默认 120 秒），并**无感重试切换到下一个可用 Key**；遇到 401 自动禁用失效 Key。
 - **锁屏后台持续保活**：基于 Android 原生前台服务（Foreground Service）+ CPU `WakeLock` + `WifiLock`，防止手机熄屏休眠断流。
 - **极速流式透传**：上游 HTTP/2 长连接复用（Keep-Alive），流式 SSE 逐块实时 flush，杜绝卡顿。
 - **自动 DNS 适配**：App 读取当前网络的系统 DNS 注入内核，内核自建解析器并并行探测可用 DNS（含国内公共 DNS 兜底），彻底规避安卓子进程 `/etc/resolv.conf` 缺失导致的 `lookup ... :53: connection refused`。
 - **双地址提示**：主 URL 固定为 `http://127.0.0.1:8080/v1`（手机内的 Agent 填这个，换网不用改），另附局域网地址供其他设备使用，均支持一键复制。
 
-> 📌 **当前版本：v1.0.11**。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+> 📌 **当前版本：v1.0.12**。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -52,13 +53,13 @@
 
 4. **打 tag 触发正式发布（才会生成 Release）**：
    ```bash
-   git tag v1.0.11
-   git push origin v1.0.11
+   git tag v1.0.12
+   git push origin v1.0.12
    ```
    > 只有推送 `v*` 形式的 tag 才会构建签名 APK 并创建 GitHub Release；仅 `push main` 只上传 Artifact 且**不创建 Release**。
 
 5. **下载 APK 安装包**：
-   - **正式版（推荐）**：打开该 GitHub 仓库的 **Releases** 页面，下载最新 Release 中的 `AgnesGateway-v1.0.11.apk`，即签名可覆盖升级的安装包。
+   - **正式版（推荐）**：打开该 GitHub 仓库的 **Releases** 页面，下载最新 Release 中的 `AgnesGateway-v1.0.12.apk`，即签名可覆盖升级的安装包。
    - **开发版**：在 **Actions** 标签页点开 `Build Android APK` 运行记录，页面底部的 **Artifacts** 区域可下载 `AgnesGateway-APK.zip`（仅 `push main` 时为 `AgnesGateway-dev-<提交短哈希>.apk`）。
 
 ---

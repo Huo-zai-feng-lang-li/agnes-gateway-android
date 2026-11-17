@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,71 @@ func init() {
 // formatLogTime 返回规范的当前时区时间格式 HH:mm:ss
 func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
+}
+
+// 上游错误体只用于日志取证，写入前统一截断并抹掉可能回显的凭证
+const (
+	maxUpstreamErrorBody     = 8192
+	maxUpstreamErrorLogRunes = 300
+)
+
+var upstreamKeyPattern = regexp.MustCompile(`sk-[A-Za-z0-9_-]{6,}`)
+
+// sanitizeUpstreamBody 将上游错误体压成单行、截断到 300 字，并脱敏 sk- 凭证
+func sanitizeUpstreamBody(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = upstreamKeyPattern.ReplaceAllString(text, "sk-***")
+	runes := []rune(text)
+	if len(runes) > maxUpstreamErrorLogRunes {
+		return string(runes[:maxUpstreamErrorLogRunes]) + "…"
+	}
+	return text
+}
+
+// sanitizeLogField 清洗客户端可控字段，防止换行注入伪造日志，并截断到 64 字
+func sanitizeLogField(text string) string {
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	runes := []rune(text)
+	if len(runes) > 64 {
+		return string(runes[:64]) + "…"
+	}
+	return text
+}
+
+// readUpstreamError 读取上游错误体，最多 8KB，避免异常响应撑爆内存
+func readUpstreamError(body io.Reader) []byte {
+	b, _ := io.ReadAll(io.LimitReader(body, maxUpstreamErrorBody))
+	return b
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, n := range needles {
+		if strings.Contains(text, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// classify403 将上游 403 归类为风控、额度、模型权限、网段四类。
+// 返回日志标签、冷却原因和冷却时长；风控冷却更久，避免持续冲撞加重限制。
+func classify403(body string) (tag string, reason string, cooldown time.Duration) {
+	lower := strings.ToLower(body)
+	switch {
+	case containsAny(lower, "unusual activity", "temporarily restricted", "risk control", "abuse detected", "异常活动", "风控", "暂时限制"):
+		return "风控", "403_risk_control", 10 * time.Minute
+	case containsAny(lower, "quota", "insufficient quota", "balance", "额度", "余额", "不足"):
+		return "拒绝", "403_quota", 30 * time.Minute
+	case containsAny(lower, "无权使用模型", "not allowed", "no permission", "permission denied", "model access", "无权", "未开通", "无权限"):
+		return "拒绝", "403_model_forbidden", 30 * time.Minute
+	case containsAny(lower, "subnet", "ip restriction", "ip address", "client ip", "网段"):
+		return "拒绝", "403_ip_restricted", 30 * time.Minute
+	default:
+		return "拒绝", "403_forbidden", 60 * time.Second
+	}
 }
 
 // KeyState 记录单个 Key 的运行时健康状态
@@ -266,7 +332,9 @@ func logAllUnavailable() {
 	log.Printf("%s [告警] 号池全部不可用 (所有Key均被限流或已失效)", formatLogTime())
 }
 
-func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time.Duration) {
+// applyCooldown 记录 Key 冷却状态，返回冷却后号池是否已全部不可用。
+// 日志由调用方输出，便于 403 场景附带上游原文和自定义标签。
+func (p *PoolManager) applyCooldown(ks *KeyState, errReason string, duration time.Duration) bool {
 	if duration <= 0 {
 		duration = time.Duration(p.cooldownSec) * time.Second
 	}
@@ -275,14 +343,21 @@ func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time
 	ks.CooldownTill = time.Now().Add(duration)
 	ks.LastError = errReason
 	dead := p.allUnavailableLocked(time.Now())
-	disp := ks.DisplayName
 	p.mu.Unlock()
+	return dead
+}
 
-	// 精准输出日志：严格区分真实 429 限流 vs 网络超时/异常避让
+func (p *PoolManager) MarkCooldown(ks *KeyState, errReason string, duration time.Duration) {
+	dead := p.applyCooldown(ks, errReason, duration)
+	disp := p.displayNameOf(ks)
+
+	// 精准输出日志：严格区分真实 429 限流 vs 网络超时/异常避让 vs 上游 403
 	if strings.Contains(errReason, "429") || strings.Contains(errReason, "rate_limit") {
 		log.Printf("%s [限流] 429 速率限制 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
 	} else if strings.Contains(errReason, "timeout") || strings.Contains(errReason, "deadline") {
 		log.Printf("%s [避让] 响应超时 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
+	} else if strings.Contains(errReason, "403") {
+		log.Printf("%s [拒绝] 上游 403 | Key: %s -> 冷却 %v", formatLogTime(), disp, duration)
 	} else {
 		log.Printf("%s [避让] 连接异常故障 | Key: %s -> 避让 %v", formatLogTime(), disp, duration)
 	}
@@ -803,6 +878,22 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 	isStream := isStreamRequest(reqBody) || strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 
+	modelPart := reqModel
+	if modelPart == "" {
+		modelPart = "default"
+	}
+	modelPart = sanitizeLogField(modelPart)
+	// 请求入口日志：客户端报错但网关没有对应记录时，用这一行判断请求是否真的到达网关
+	clientHost, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+	if splitErr != nil {
+		clientHost = r.RemoteAddr
+	}
+	clientHost = sanitizeLogField(clientHost)
+	logPath := sanitizeLogField(r.URL.Path)
+	reqStart := time.Now()
+	log.Printf("%s [请求] %s %s | %s | stream=%v | from=%s",
+		formatLogTime(), r.Method, logPath, modelPart, isStream, clientHost)
+
 	// 动态计算本次请求的最大尝试次数：号池中当前有多少 Key 就至少试多少次
 	// 绝不在还有健康可用 Key 时因固定重试次数上限而过早放弃
 	totalPoolKeys := s.pool.TotalCount()
@@ -901,7 +992,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		// 针对 429 速率限制退避重试 (优先解析 Retry-After 头部)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			errBytes := readUpstreamError(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
@@ -919,7 +1010,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		// 针对 401 凭证无效（失效）直接从号池彻底移除
 		if resp.StatusCode == http.StatusUnauthorized {
-			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			errBytes := readUpstreamError(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
@@ -933,13 +1024,50 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 针对 5xx 临时错误重试 (15 秒避让)
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// 403 是账号级/Key 级拒绝的最常见形态：风控限制、额度耗尽、模型无权限、网段限制。
+		// 必须冷却该 Key 并切号，否则长任务轮询到受限 Key 时会被客户端当成致命错误直接终止。
+		if resp.StatusCode == http.StatusForbidden {
+			errBytes := readUpstreamError(resp.Body)
 			resp.Body.Close()
 			lastStatusCode = resp.StatusCode
 			lastErrBody = errBytes
-			log.Printf("%s [失败] HTTP %d (%.2fs) | Key: %s", formatLogTime(), resp.StatusCode, ttfbSec, s.pool.displayNameOf(keyState))
+
+			tag, reason, cooldown := classify403(string(errBytes))
+			dead := s.pool.applyCooldown(keyState, reason, cooldown)
+			log.Printf("%s [%s] HTTP 403 (%.2fs) | %s | Key: %s | 冷却 %v | %s",
+				formatLogTime(), tag, ttfbSec, modelPart, s.pool.displayNameOf(keyState), cooldown, sanitizeUpstreamBody(errBytes))
+			if dead {
+				logAllUnavailable()
+			}
+			if s.pool.HasAvailableKeys() {
+				log.Printf("%s [切号] Key: %s 被上游拒绝(403)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				continue
+			}
+			s.writeUpstreamError(w, resp.StatusCode, errBytes)
+			return
+		}
+
+		// 其余 4xx（400 参数错误/上下文超长、404 模型或路径不存在、422 校验失败等）属于请求级错误，
+		// 换 Key 也不会变好。必须记失败并原样回传，绝不能落入「成功」分支。
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			errBytes := readUpstreamError(resp.Body)
+			resp.Body.Close()
+			lastStatusCode = resp.StatusCode
+			lastErrBody = errBytes
+			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | Key: %s | %s",
+				formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), sanitizeUpstreamBody(errBytes))
+			s.writeUpstreamError(w, resp.StatusCode, errBytes)
+			return
+		}
+
+		// 针对 5xx 临时错误重试 (15 秒避让)
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			errBytes := readUpstreamError(resp.Body)
+			resp.Body.Close()
+			lastStatusCode = resp.StatusCode
+			lastErrBody = errBytes
+			log.Printf("%s [失败] HTTP %d (%.2fs) | %s | Key: %s | %s",
+				formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), sanitizeUpstreamBody(errBytes))
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 
 			if s.pool.HasAvailableKeys() {
@@ -969,18 +1097,20 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 规范化输出极简日志：日志时间、成功状态、首字响应时间、模型、Key/备注
-		modelPart := reqModel
-		if modelPart == "" {
-			modelPart = "default"
+		// 流式请求先记首字时间；非流式在正文复制完后统一记总耗时与字节数
+		if isSSE {
+			log.Printf("%s [成功] %.2fs | %s | Key: %s | stream", formatLogTime(), ttfbSec, modelPart, s.pool.displayNameOf(keyState))
 		}
-		log.Printf("%s [成功] %.2fs | %s | Key: %s", formatLogTime(), ttfbSec, modelPart, s.pool.displayNameOf(keyState))
 
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
+		var sentBytes int64
+		var readErr error
 		for {
 			select {
 			case <-r.Context().Done():
+				log.Printf("%s [中断] 客户端断开 (%.2fs, 下发 %d B) | %s | Key: %s",
+					formatLogTime(), time.Since(reqStart).Seconds(), sentBytes, modelPart, s.pool.displayNameOf(keyState))
 				io.CopyN(io.Discard, resp.Body, 64*1024)
 				return
 			default:
@@ -989,16 +1119,35 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
 				if _, wErr := w.Write(buf[:n]); wErr != nil {
+					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %d B) | %s | Key: %s | %v",
+						formatLogTime(), time.Since(reqStart).Seconds(), sentBytes, modelPart, s.pool.displayNameOf(keyState), wErr)
 					io.CopyN(io.Discard, resp.Body, 64*1024)
 					return
 				}
+				sentBytes += int64(n)
 				if isFlusher {
 					flusher.Flush()
 				}
 			}
 			if rErr != nil {
+				readErr = rErr
 				break
 			}
+		}
+
+		elapsedSec := time.Since(reqStart).Seconds()
+		if readErr == io.EOF {
+			if isSSE {
+				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %d B) | %s | Key: %s",
+					formatLogTime(), elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState))
+			} else {
+				log.Printf("%s [成功] HTTP %d %.2fs | %d B | %s | Key: %s",
+					formatLogTime(), resp.StatusCode, elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState))
+			}
+		} else {
+			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
+			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %d B) | %s | Key: %s | %v",
+				formatLogTime(), elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState), readErr)
 		}
 		return
 	}

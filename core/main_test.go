@@ -557,3 +557,118 @@ func TestGatewayServer_StreamingTimeoutFastFailover(t *testing.T) {
 	}
 }
 
+func TestClassify403(t *testing.T) {
+	cases := []struct {
+		name         string
+		body         string
+		wantTag      string
+		wantReason   string
+		wantCooldown time.Duration
+	}{
+		{"risk_control", `{"error":{"message":"We've detected unusual activity on your account. Access has been temporarily restricted."}}`, "风控", "403_risk_control", 10 * time.Minute},
+		{"quota", `{"error":{"message":"insufficient quota"}}`, "拒绝", "403_quota", 30 * time.Minute},
+		{"model_forbidden", `{"error":{"message":"该令牌无权使用模型 agnes-3.0-flash"}}`, "拒绝", "403_model_forbidden", 30 * time.Minute},
+		{"ip_restricted", `{"error":{"message":"only allowed from ip address 1.2.3.4"}}`, "拒绝", "403_ip_restricted", 30 * time.Minute},
+		{"generic", `{"error":{"message":"forbidden"}}`, "拒绝", "403_forbidden", 60 * time.Second},
+	}
+	for _, c := range cases {
+		tag, reason, cooldown := classify403(c.body)
+		if tag != c.wantTag || reason != c.wantReason || cooldown != c.wantCooldown {
+			t.Fatalf("%s: got (%s,%s,%v), want (%s,%s,%v)", c.name, tag, reason, cooldown, c.wantTag, c.wantReason, c.wantCooldown)
+		}
+	}
+}
+
+// 风控 Key 返回 403 时必须冷却并切到健康 Key，不能让客户端拿到 403 终止长任务
+func TestGatewayServer_403RiskControlFailover(t *testing.T) {
+	reqCount := 0
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		if r.Header.Get("Authorization") == "Bearer risk-key" {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"message":"We've detected unusual activity on your account. Access has been temporarily restricted."}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n"))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 60)
+	pool.SetKeys([]string{"risk-key#风控号", "good-key#正常号"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash","stream":true}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after 403 failover, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("OK")) {
+		t.Fatalf("expected healthy key response, got: %s", rr.Body.String())
+	}
+	if reqCount != 2 {
+		t.Fatalf("expected 2 upstream requests (403 + 200), got %d", reqCount)
+	}
+	if pool.AvailableCount() != 1 {
+		t.Fatalf("expected risk key cooled, 1 available key left, got %d", pool.AvailableCount())
+	}
+}
+
+// 全部 Key 都 403 时必须原样回传最后一次上游错误，而不是伪装成成功
+func TestGatewayServer_403AllKeysReturnsUpstreamError(t *testing.T) {
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":{"message":"We've detected unusual activity on your account. Access has been temporarily restricted."}}`))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 60)
+	pool.SetKeys([]string{"k1#一号", "k2#二号"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash"}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when all keys forbidden, got %d", rr.Code)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("unusual activity")) {
+		t.Fatalf("expected upstream 403 body preserved, got: %s", rr.Body.String())
+	}
+	if pool.AvailableCount() != 0 {
+		t.Fatalf("expected all keys cooled, got %d available", pool.AvailableCount())
+	}
+}
+
+// 400 是请求级错误：不得换号、不得冷却 Key、不得记成功
+func TestGatewayServer_400DoesNotRotateOrCooldown(t *testing.T) {
+	reqCount := 0
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"context length exceeded"}}`))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 60)
+	pool.SetKeys([]string{"k1#一号", "k2#二号"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash"}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 pass-through, got %d", rr.Code)
+	}
+	if reqCount != 1 {
+		t.Fatalf("400 must not rotate keys, expected 1 upstream request, got %d", reqCount)
+	}
+	if pool.AvailableCount() != 2 {
+		t.Fatalf("400 must not cooldown keys, got %d available", pool.AvailableCount())
+	}
+}

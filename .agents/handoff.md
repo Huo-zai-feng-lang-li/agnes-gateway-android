@@ -97,10 +97,19 @@
     - 单元测试全量绿灯通过（新增 4 个针对 429 切号、流式首字超时切号、Retry-After 解析、可用号统计测试）。
     - 版本遵循禁止包含数字 4 规则，递增至 **versionCode 12 / versionName 1.0.11**。
 
+32. **v1.0.12：修复上游 403 被误记成功并透传（客户端 `Invalid API key` / 长任务突然终止）**
+    - 现象：客户端长任务突然报 `Invalid API key` 终止，但手机网关日志只有绿色 `[成功]`，看不到错误。
+    - 根因：`forwardRequest` 只处理 429/401/5xx，400/403/404/422 全部落入成功分支；403 既不记错误也不冷却换号，原样透传。真实上游实测 13 个 Key 中 `sk-qSp...RaNO` 对 `/v1/models` 与 `agnes-3.0-flash` 均返回 403「unusual activity / temporarily restricted」，长任务轮询到该 Key 即触发。
+    - 修复：新增 403 分类（风控 10m / 额度 30m / 模型无权限 30m / 网段 30m / 通用 60s），冷却并立即切号；全部 Key 都 403 时才回传最后一次上游原文。400/404/422 记 `[失败]` 并原样回传，不换号不冷却；5xx/401 日志补上游原文（300 字截断 + `sk-` 脱敏）。
+    - 可观测性：新增 `[请求]` 入口日志、`[完成]/[断流]/[中断]` 流式结束日志；Android `PATTERN_TAG` / `colorizeLog` 适配 `[请求]/[完成]/[断流]/[拒绝]/[风控]`。
+    - 单测新增 4 个：403 风控切号、全池 403 回传、400 不换号不冷却、403 分类表；`go test ./...` / `go vet ./...` 通过。
+    - 真实端到端：风控 Key + 正常 Key 同池连续 4 次请求全部 200，日志依次出现 `[请求]` → `[风控] HTTP 403 ... 冷却 10m0s` → `[切号]` → `[成功] HTTP 200`；仅放风控 Key 时客户端收到 403 原文 + `[告警] 号池全部不可用`，不再出现 `[成功]`。
+    - 版本递增至 **versionCode 13 / versionName 1.0.12**；arm64 与 jniLibs SHA256 = `AC2CD7F633E74E9D9523EEE9A120DEE0CB89A1072CEECEFAD9DE50537950613F`（两侧一致）。
+
 ## 未完成 / 下一步
-- 当前最新版本 v1.0.11。
-- 准备打 tag `v1.0.11` 并推送。
-- 发版后核对 Release 资产名与版本号一致。
+- 当前最新版本 v1.0.12（代码、二进制、CHANGELOG、README、handoff 已同步）。
+- 待提交 → `git push origin main` → 打 tag `v1.0.12` 并推送，由 CI 产出 APK。
+- 发版后核对 Release 资产名 `AgnesGateway-v1.0.12.apk` 与版本号一致。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）

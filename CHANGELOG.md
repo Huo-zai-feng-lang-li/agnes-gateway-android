@@ -2,6 +2,21 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.12] - 2026-11-17
+
+### 修复（关键）
+- **上游 403 被误记成「成功」并原样透传**：网关此前只处理 429/401/5xx，400/403/404/422 全部落入成功分支，既不打错误日志也不冷却换号。长任务轮询到被上游风控的 Key 时，403 会直接透传给客户端，客户端显示 `Invalid API key` 并终止任务，而手机日志只有绿色 `[成功]`。
+- **403 自动冷却与切号**：新增 403 分类（风控限制 / 额度不足 / 模型无权限 / 网段限制 / 通用拒绝），分别冷却 10 分钟、30 分钟、30 分钟、30 分钟、60 秒，并立即切换下一 Key；只有全部 Key 都不可用时才把最后一次上游 403 原文回传客户端。
+- **4xx 不再记成功**：400/404/422 等请求级错误记 `[失败]` 并原样回传，不换号、不冷却；5xx 与 401 日志补带上游原文（截断 300 字、`sk-` 凭证脱敏）。
+- **长任务断流留痕**：流式读循环新增 `[完成]`（正常结束）、`[断流]`（上游中断或写回客户端失败）、`[中断]`（客户端断开）三类日志，不再静默 `break`。
+- **请求入口日志**：每个业务请求新增 `[请求] METHOD PATH | model | stream | from IP`，用于区分「请求没到网关」与「到了但被静默处理」。
+
+### 验证
+- 真实上游实测：13 个 Key 中 `sk-qSp...RaNO` 对 `/v1/models` 与 `agnes-3.0-flash` 均返回 403「unusual activity / temporarily restricted」，其余 12 个 Key 正常。
+- 修复后同池（风控 Key + 正常 Key）连续 4 次请求全部 200：日志依次出现 `[请求]` → `[风控] HTTP 403 ... 冷却 10m0s` → `[切号]` → `[成功] HTTP 200`。
+- 仅放风控 Key 时，客户端收到 403 与上游原文，日志为 `[风控]` + `[告警] 号池全部不可用`，不再出现 `[成功]`。
+- 单测覆盖：403 风控切号、全池 403 回传、400 不换号不冷却、403 分类表；`go test ./...` 与 `go vet ./...` 通过。
+
 ## [v1.0.11] - 2026-11-09
 
 ### 性能与优化
@@ -165,6 +180,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.12]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.9
