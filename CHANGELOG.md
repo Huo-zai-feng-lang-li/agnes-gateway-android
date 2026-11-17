@@ -14,7 +14,7 @@
 ### 验证
 - `go test -count=1 ./...` 与 `go vet ./...` 通过，新增 `TestFormatSuccessLog`、`TestLogSuccessKeyChangeDivider`。
 - arm64 内核 SHA256：`8F97B83793FB86E1CB2828F590E401D80D290A377ED6A7546BECE9D68F5ACA58`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
-- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+- GitHub Actions tag 构建成功（run `44125450673`）；Release APK：7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`；APK 内嵌 `libgateway.so` 已确认新格式且无“首字/结束”旧文案。
 
 ## [v1.0.20] - 2026-11-17
 
