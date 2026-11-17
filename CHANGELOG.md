@@ -11,7 +11,7 @@
 
 ### 验证
 - XML 校验通过；`go test -count=1 ./...` 与 `go vet ./...` 通过。
-- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+- GitHub Actions tag 构建成功（run `44139859764`）；Release APK：7,171,412 B，SHA256 `547BC8A9624EDF68915264432D3AC3F221779C8CDDC9D49B47E6D449FC6B97D3`；ZIP 完整性通过。
 
 ## [v1.0.27] - 2026-11-17
 
