@@ -107,9 +107,10 @@
     - 版本递增至 **versionCode 13 / versionName 1.0.12**；arm64 与 jniLibs SHA256 = `AC2CD7F633E74E9D9523EEE9A120DEE0CB89A1072CEECEFAD9DE50537950613F`（两侧一致）。
 
 ## 未完成 / 下一步
-- 当前最新版本 v1.0.12（代码、二进制、CHANGELOG、README、handoff 已同步）。
-- 待提交 → `git push origin main` → 打 tag `v1.0.12` 并推送，由 CI 产出 APK。
-- 发版后核对 Release 资产名 `AgnesGateway-v1.0.12.apk` 与版本号一致。
+- v1.0.12 已提交（f2201be）、推送 main、打 tag 并发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
+- Release 资产：`AgnesGateway-v1.0.12.apk`（7,161,696 B，sha256 `99a16f249916887a84e78c9900f4364250bf06e44ed6fda62f90f7ef6750925d`）。
+- CI 运行 44092683114（tag v1.0.12）success，44092653879（main）success。
+- 用户侧：安装 v1.0.12 覆盖升级即可；`sk-qSp...RaNO` 若长期 403，建议直接从号池移除。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）
