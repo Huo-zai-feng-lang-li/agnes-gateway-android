@@ -16,7 +16,7 @@
 ### 验证
 - XML 校验通过；`go test -count=1 ./...` 与 `go vet ./...` 通过。
 - arm64 内核沿用 v1.0.22：SHA256 `4386138C81E0801D2FCBE46C3C004E7ACD2A6CADFEC5ABC6BE3D706E49812D5C`。
-- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+- GitHub Actions tag 构建成功（run `44132664676`）；Release APK：7,171,368 B，SHA256 `2ADACA43B3271CDFA5597A6E787B6210192D9B127C8B418EB929F2EB9AE76DB2`；ZIP 完整性校验通过。
 
 ## [v1.0.23] - 2026-11-17
 

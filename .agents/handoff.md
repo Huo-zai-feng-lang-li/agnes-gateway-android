@@ -178,7 +178,7 @@
     - 版本递增至 **versionCode 25 / versionName 1.0.25**（按规则跳过 1.0.24）。
 
 ## 未完成 / 下一步
-- v1.0.25 已改完：页面四边 10dp、卡片 5dp 圆角、状态行高度压缩修正文字顶部留白；待 XML 校验、测试、交叉编译、提交、打 tag v1.0.25 并发布 Release。
+- v1.0.25 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25，APK 7,171,368 B，SHA256 `2ADACA43B3271CDFA5597A6E787B6210192D9B127C8B418EB929F2EB9AE76DB2`。
 - v1.0.23 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23，APK 7,171,288 B，SHA256 `1F49A45514492EA84096A8AF641D92D92C878B20AF3018AC6040E5ADE37385CF`。
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
