@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.27] - 2026-11-17
+
+### 优化
+- **换号分隔线再加长**：由 15 个 `─` 增加到 21 个，按当前等宽字体宽度可覆盖到第二行 Key 后缀。
+- 分隔线仍然不带时间前缀，只在 Key 变化时出现在日志块之间。
+
+### 验证
+- `go test -count=1 ./...` 与 `go vet ./...` 通过；测试断言分隔线长度为 21 个字符。
+- arm64 内核 SHA256：`E3BE02D83E7687B8EF3B3145538B2B7C76C3F38189F17A116995D11FF1631471`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
+- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+
 ## [v1.0.26] - 2026-11-17
 
 ### 优化
@@ -343,6 +354,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.27]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.27
 [v1.0.26]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.26
 [v1.0.25]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25
 [v1.0.23]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23

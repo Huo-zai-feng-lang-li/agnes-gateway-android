@@ -180,10 +180,13 @@
     - 外层卡片圆角 5dp → 6dp。
     - 状态卡顶部内边距 4dp → 6dp。
     - 版本递增至 **versionCode 26 / versionName 1.0.26**。
+46. **v1.0.27：分隔线加长覆盖 Key**
+    - 换号分隔线由 15 个 `─` 增加到 21 个，覆盖到第二行 Key 后缀。
+    - 版本递增至 **versionCode 27 / versionName 1.0.27**。
 
 ## 未完成 / 下一步
-- v1.0.26 已改完：卡片圆角 6dp、状态卡顶部 6dp；待 XML 校验、提交、打 tag v1.0.26 并发布 Release。
-- v1.0.25 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25，APK 7,171,368 B，SHA256 `2ADACA43B3271CDFA5597A6E787B6210192D9B127C8B418EB929F2EB9AE76DB2`。
+- v1.0.27 已改完：分隔线 15→21 个字符，覆盖到 Key；待测试、交叉编译、提交、打 tag v1.0.27 并发布 Release。
+- v1.0.26 已改完：卡片圆角 6dp、状态卡顶部 6dp；已打 tag，CI 构建状态需核对。
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。

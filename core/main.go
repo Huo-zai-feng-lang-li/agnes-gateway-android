@@ -46,7 +46,7 @@ func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
 }
 
-const logDivider = "───────────────"
+const logDivider = "─────────────────────"
 
 var (
 	logBoundaryMu           sync.Mutex

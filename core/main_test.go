@@ -88,8 +88,8 @@ func TestLogSuccessKeyChangeDivider(t *testing.T) {
 	if strings.Contains(buf.String(), "22:56:02 "+logDivider) {
 		t.Fatalf("分隔线不应带时间前缀，日志:\n%s", buf.String())
 	}
-	if len([]rune(logDivider)) != 15 {
-		t.Fatalf("分隔线长度 = %d, want 15", len([]rune(logDivider)))
+	if len([]rune(logDivider)) != 21 {
+		t.Fatalf("分隔线长度 = %d, want 21", len([]rune(logDivider)))
 	}
 }
 
