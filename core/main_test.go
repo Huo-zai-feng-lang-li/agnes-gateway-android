@@ -51,6 +51,14 @@ func TestEstimateCharCount(t *testing.T) {
 	}
 }
 
+func TestFormatSuccessLog(t *testing.T) {
+	got := formatSuccessLog("22:56:02", 200, 0.82, 3.20, "A3F", "IhIM", 1874)
+	want := "22:56:02 | 1.8 KB · 约 624 字\n[200] 首字 0.82s | 结束 3.20s | A3F | IhIM"
+	if got != want {
+		t.Fatalf("formatSuccessLog() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatByteSize(t *testing.T) {
 	cases := []struct {
 		in   int64

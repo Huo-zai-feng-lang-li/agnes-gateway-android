@@ -722,7 +722,7 @@ class MainActivity : AppCompatActivity() {
     /** 只有近 5 秒内产生的新日志才触发顶部动效，避免回放历史日志误闪。 */
     private fun maybeFlashStatus(msg: String, timeMs: Long) {
         if (System.currentTimeMillis() - timeMs > 5000) return
-        val success = msg.contains("[成功]")
+        val success = msg.contains("[成功]") || PATTERN_TAG_2XX.containsMatchIn(msg)
         val failure = msg.contains("[失败]") || msg.contains("[拒绝]") ||
             msg.contains("[断流]") || msg.contains("[封禁]") || msg.contains("[风控]") ||
             msg.contains("[限流]") || msg.contains("[超时]") || msg.contains("[告警]")
@@ -833,7 +833,8 @@ class MainActivity : AppCompatActivity() {
             msg.contains("[超时]") || msg.contains("[避让]") || msg.contains("[风控]") -> 0xFFFFB74D.toInt() // 橙黄色
             msg.contains("[切号]") -> 0xFF00E5FF.toInt() // 青色
             msg.contains("[中断]") -> 0xFF8B949E.toInt() // 灰色
-            msg.contains("[成功]") -> 0xFF3FB950.toInt() // 成功：鲜绿色
+            msg.contains("────") -> 0xFF8B949E.toInt() // 换号分隔线灰色
+            msg.contains("[成功]") -> 0xFF3FB950.toInt() // 兼容旧日志：鲜绿色
             msg.contains("[告警]") -> 0xFFFF1744.toInt() // 警示红
             msg.startsWith("[系统]") || msg.startsWith("[DNS]") -> 0xFF58A6FF.toInt() // 系统蓝
             msg.startsWith("===") -> 0xFF8B949E.toInt()

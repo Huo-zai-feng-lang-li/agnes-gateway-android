@@ -2,6 +2,20 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.20] - 2026-11-17
+
+### 优化
+- **成功日志改为两行**：第一行 `22:56:02 | 1.8 KB · 约 624 字`；第二行 `[200] 首字 0.82s | 结束 3.20s | A3F | IhIM`。
+- **去掉“成功”文字**：响应码直接用 `[200]` 标签展示；Android 顶部成功动效改为识别 `[2xx]`，不依赖 `[成功]` 字样。
+- **首字时间**：按第一次读到上游响应正文计算；**结束时间**：按整个流式响应结束计算，均为相对请求开始。
+- **换号分隔线**：每次 `[切号]` 前先输出一条灰色 `────` 分隔线，避免新旧 Key 的日志粘在一起。
+- 失败、断流、中断日志保持原有一行格式。
+
+### 验证
+- 新增 `TestFormatSuccessLog`，校验两行格式与 KB/字数换算；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- arm64 内核 SHA256：`637DCB9699AE86603262F38B3A2791D206D83F5E708B8D57559F3C7D86BDD2BA`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
+- GitHub Actions 构建与 Release APK 待发布后回填。
+
 ## [v1.0.19] - 2026-11-17
 
 ### 优化
@@ -262,6 +276,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.20]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 [v1.0.19]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
 [v1.0.18]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
 [v1.0.17]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17

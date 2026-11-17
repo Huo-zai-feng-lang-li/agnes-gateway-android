@@ -46,12 +46,22 @@ func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
 }
 
-// logKeySwitch 输出换号日志，便于定位账号切换；正常成功只保留一行，失败仍单独记录。
+const logDivider = "──────────────────────────────"
+
+// formatSuccessLog 生成两行成功日志：第一行时间与数据量，第二行响应码与耗时信息。
+func formatSuccessLog(ts string, status int, firstByteSec, elapsedSec float64, modelPart, keyDisplay string, sentBytes int64) string {
+	return fmt.Sprintf("%s | %s · 约 %d 字\n[%d] 首字 %.2fs | 结束 %.2fs | %s | %s",
+		ts, formatByteSize(sentBytes), estimateCharCount(sentBytes),
+		status, firstByteSec, elapsedSec, modelPart, keyDisplay)
+}
+
+// logKeySwitch 在换号前输出一条分隔线，再输出换号日志；正常成功仍按两行记录。
 func logKeySwitch(keyDisplay, message string) {
+	ts := formatLogTime()
 	if keyDisplay != "" {
-		log.Printf("%s [切号] %s %s", formatLogTime(), keyDisplay, message)
+		log.Printf("%s %s\n%s [切号] %s %s", ts, logDivider, ts, keyDisplay, message)
 	} else {
-		log.Printf("%s [切号] %s", formatLogTime(), message)
+		log.Printf("%s %s\n%s [切号] %s", ts, logDivider, ts, message)
 	}
 }
 
@@ -999,7 +1009,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			client = s.streamClient
 		}
 
-		// 记录发起单次上游调用的精准耗时（首字时间 TTFB）
+		// 记录发起单次上游调用的响应头耗时（不是正文首字时间）
 		subStart := time.Now()
 		resp, reqErr := client.Do(outReq)
 		ttfbSec := time.Since(subStart).Seconds()
@@ -1174,6 +1184,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
 		var sentBytes int64
+		var firstByteSec float64
+		var firstByteSet bool
 		var readErr error
 		for {
 			select {
@@ -1187,6 +1199,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
+				if !firstByteSet {
+					firstByteSec = time.Since(reqStart).Seconds()
+					firstByteSet = true
+				}
 				if _, wErr := w.Write(buf[:n]); wErr != nil {
 					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",
 						formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState), wErr)
@@ -1206,10 +1222,12 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		elapsedSec := time.Since(reqStart).Seconds()
 		if readErr == io.EOF {
-			// 正常成功只留这一行：状态码、总耗时、模型、Key 尾号、下发数据量。
-			log.Printf("%s [成功] %d %.2fs | %s | %s | %s · 约 %d 字",
-				formatLogTime(), resp.StatusCode, elapsedSec, modelPart, s.pool.displayNameOf(keyState),
-				formatByteSize(sentBytes), estimateCharCount(sentBytes))
+			if !firstByteSet {
+				firstByteSec = elapsedSec
+			}
+			// 两行一条成功记录：第一行时间 + 数据量，第二行响应码 + 首字/结束耗时 + 模型 + Key。
+			log.Printf("%s", formatSuccessLog(formatLogTime(), resp.StatusCode,
+				firstByteSec, elapsedSec, modelPart, s.pool.displayNameOf(keyState), sentBytes))
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
 			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",

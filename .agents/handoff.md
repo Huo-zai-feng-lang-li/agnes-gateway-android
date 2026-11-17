@@ -147,8 +147,15 @@
     - 卡片内部 padding 与卡片间距不变，避免正文过挤。
     - 仅 Android 布局改动，Go 网关逻辑沿用 v1.0.17。
     - 版本递增至 **versionCode 19 / versionName 1.0.19**。
+39. **v1.0.20：成功日志改为两行**
+    - 第一行：`22:56:02 | 1.8 KB · 约 624 字`。
+    - 第二行：`[200] 首字 0.82s | 结束 3.20s | A3F | IhIM`，去掉“成功”文字。
+    - 首字时间取第一次读到上游正文，结束时间取流式响应结束，均相对请求开始。
+    - 每次 `[切号]` 前插入灰色 `────` 分隔线；Android 顶部成功动效改为识别 `[2xx]`。
+    - 版本递增至 **versionCode 20 / versionName 1.0.20**。
 
 ## 未完成 / 下一步
+- v1.0.20 已改完：成功日志两行、去掉“成功”文字、首字/结束耗时、换号前分隔线；待测试、交叉编译、提交、打 tag v1.0.20 并发布 Release。
 - v1.0.19 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
 - Release 资产：`AgnesGateway-v1.0.19.apk`（7,169,340 B，sha256 `1DCED9026C7C448BB7DABEF405CCAC1876EC6BCB92E83E7C60229BBA994B5398`，本地下载核对一致）。
 - v1.0.19 待真机验收：页面左右 12dp、底部 8dp 留白是否合适。
