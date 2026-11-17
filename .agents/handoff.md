@@ -144,7 +144,9 @@
     - 版本递增至 **versionCode 18 / versionName 1.0.18**。
 
 ## 未完成 / 下一步
-- v1.0.18 已改完：顶部“运行中”水波纹放大（28dp → 40dp、圆点 3.5dp → 4.5dp、最大半径 12dp → 18dp），待提交、打 tag v1.0.18 并由 GitHub Actions 发布 Release。
+- v1.0.18 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
+- Release 资产：`AgnesGateway-v1.0.18.apk`（7,169,300 B，sha256 `7F98FC8211A370E79B20D078A194331616477441916128F8646CA232D1E9DAF2`，本地下载核对一致）。
+- v1.0.18 待真机验收：顶部“运行中”水波纹放大后的视觉大小与文字间距。
 - v1.0.17 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17
 - Release 资产：`AgnesGateway-v1.0.17.apk`（7,169,304 B，sha256 `AF11E42D80BC3BFECF38644A874D674D3DC4C63C6FBC69BB7E81C476363B7B68`，本地下载核对一致）。
 - v1.0.17 待真机验收：成功只保留一行、状态码/总耗时/模型简写/Key 尾号/数据量与预估字数、失败与断流仍可见。

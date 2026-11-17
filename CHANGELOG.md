@@ -10,6 +10,9 @@
 
 ### 验证
 - Android 由 GitHub Actions 编译验证；Go 网关二进制沿用 v1.0.17（本次未改 Go 代码）。
+- GitHub Actions：main CI `44116190518` 成功；tag CI `44116229728` 成功并发布 Release。
+- Release APK：`AgnesGateway-v1.0.18.apk`，7,169,300 B，SHA256 `7F98FC8211A370E79B20D078A194331616477441916128F8646CA232D1E9DAF2`（本地下载核对一致）。
+- APK 内 `AndroidManifest.xml` 版本名为 `1.0.18`；内嵌内核仍为 v1.0.17 成功单行日志版本。
 
 ## [v1.0.17] - 2026-11-17
 
