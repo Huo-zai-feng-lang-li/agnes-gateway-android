@@ -11,7 +11,7 @@
 ### 验证
 - `go test -count=1 ./...` 与 `go vet ./...` 通过；测试断言分隔线长度为 21 个字符。
 - arm64 内核 SHA256：`E3BE02D83E7687B8EF3B3145538B2B7C76C3F38189F17A116995D11FF1631471`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
-- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+- GitHub Actions tag 构建成功（run `44135856207`）；Release APK：7,171,404 B，SHA256 `FDFA9935B67FEC29E801A5B032752600A0313F98F7BC95F41A7ACAA4506119AF`；ZIP 完整性通过，内嵌内核包含 21 字符分隔线。
 
 ## [v1.0.26] - 2026-11-17
 

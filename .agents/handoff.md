@@ -185,8 +185,8 @@
     - 版本递增至 **versionCode 27 / versionName 1.0.27**。
 
 ## 未完成 / 下一步
-- v1.0.27 已改完：分隔线 15→21 个字符，覆盖到 Key；待测试、交叉编译、提交、打 tag v1.0.27 并发布 Release。
-- v1.0.26 已改完：卡片圆角 6dp、状态卡顶部 6dp；已打 tag，CI 构建状态需核对。
+- v1.0.27 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.27，APK 7,171,404 B，SHA256 `FDFA9935B67FEC29E801A5B032752600A0313F98F7BC95F41A7ACAA4506119AF`。
+- v1.0.26 已发布（已被 v1.0.27 取代）：卡片圆角 6dp、状态卡顶部 6dp。
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
