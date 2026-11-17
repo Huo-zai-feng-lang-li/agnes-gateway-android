@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.28] - 2026-11-17
+
+### 优化
+- **页面四边留白改为 15dp**。
+- **外层卡片圆角改为 8dp**。
+- **“运行中”顶部内边距改为 10dp**。
+
+### 验证
+- XML 校验通过；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+
 ## [v1.0.27] - 2026-11-17
 
 ### 优化
@@ -354,6 +365,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.28]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.28
 [v1.0.27]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.27
 [v1.0.26]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.26
 [v1.0.25]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25
