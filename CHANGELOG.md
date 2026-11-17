@@ -2,6 +2,22 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.25] - 2026-11-17
+
+### 优化
+- **页面四边留白改为 10dp**。
+- **外层卡片圆角改为 5dp**。
+- **修正“运行中”文字顶部留白偏大**：原 8dp 只是卡片内边距，实际视觉间距还叠加了 40dp 波纹视图和 Material 按钮 48dp 最小高度导致的垂直居中空白。
+  - 波纹视图高度由 40dp 缩至 32dp，动画半径保持 18dp，父行关闭裁剪避免波纹被切。
+  - “后台防杀保活”按钮取消 48dp 最小高度与上下内边距，避免撑高整行。
+  - 状态卡顶部内边距改为 4dp，使文字视觉上与下方模块标题的 8dp 顶部留白对齐。
+- 版本号按“禁止数字 4”规则跳过 `1.0.24`，直接使用 `1.0.25`。
+
+### 验证
+- XML 校验通过；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- arm64 内核沿用 v1.0.22：SHA256 `4386138C81E0801D2FCBE46C3C004E7ACD2A6CADFEC5ABC6BE3D706E49812D5C`。
+- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+
 ## [v1.0.23] - 2026-11-17
 
 ### 优化
@@ -317,6 +333,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.25]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25
 [v1.0.23]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23
 [v1.0.22]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.22
 [v1.0.21]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21

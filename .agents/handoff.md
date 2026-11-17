@@ -171,11 +171,15 @@
 43. **README 极简化并加入截图**
     - README 从工程说明改为极简版：简介、三张截图、最新 Release 下载、3 步快速开始、说明。
     - 截图存放于 `docs/screenshots/`：`01-home.webp`、`02-log.webp`、`03-fullscreen.webp`。
+44. **v1.0.25：页面留白/圆角与“运行中”文字间距修正**
+    - 根布局四边 padding 改为 10dp；外层卡片圆角改为 5dp。
+    - “运行中”文字偏大的根因：8dp 只是卡片 padding，40dp 波纹视图和 Material 按钮 48dp 最小高度共同把行高撑到 48dp，文字被垂直居中后视觉顶部留白约 20dp。
+    - 修正：波纹视图 40→32dp（动画半径仍 18dp，行 `clipChildren=false`）；按钮 `minHeight/minWidth=0`、上下 padding 0；状态卡顶部 padding 4dp。
+    - 版本递增至 **versionCode 25 / versionName 1.0.25**（按规则跳过 1.0.24）。
 
 ## 未完成 / 下一步
+- v1.0.25 已改完：页面四边 10dp、卡片 5dp 圆角、状态行高度压缩修正文字顶部留白；待 XML 校验、测试、交叉编译、提交、打 tag v1.0.25 并发布 Release。
 - v1.0.23 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23，APK 7,171,288 B，SHA256 `1F49A45514492EA84096A8AF641D92D92C878B20AF3018AC6040E5ADE37385CF`。
-- README 已改为极简版，并加入 `docs/screenshots/01-home.webp`、`02-log.webp`、`03-fullscreen.webp` 三张界面截图（待提交）。
-- v1.0.22 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.22
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
