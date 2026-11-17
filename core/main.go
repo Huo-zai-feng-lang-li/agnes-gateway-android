@@ -46,6 +46,16 @@ func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
 }
 
+// logKeySwitch 输出换号日志，并跟一条分割线；新账号的成功/完成会与旧账号日志分开。
+func logKeySwitch(keyDisplay, message string) {
+	if keyDisplay != "" {
+		log.Printf("%s [切号] %s %s", formatLogTime(), keyDisplay, message)
+	} else {
+		log.Printf("%s [切号] %s", formatLogTime(), message)
+	}
+	log.Printf("%s ──────────────────────────────", formatLogTime())
+}
+
 // 上游错误体只用于日志取证，写入前统一截断并抹掉可能回显的凭证
 const (
 	maxUpstreamErrorBody     = 8192
@@ -934,17 +944,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		modelPart = "default"
 	}
 	modelPart = sanitizeLogField(modelPart)
-	// 请求入口日志：客户端报错但网关没有对应记录时，用这一行判断请求是否真的到达网关
-	clientHost, _, splitErr := net.SplitHostPort(r.RemoteAddr)
-	if splitErr != nil {
-		clientHost = r.RemoteAddr
-	}
-	clientHost = sanitizeLogField(clientHost)
-	logPath := sanitizeLogField(r.URL.Path)
 	reqStart := time.Now()
 	modelPart = shortModelName(modelPart)
-	log.Printf("%s [请求] %s %s | %s | stream=%v | from=%s",
-		formatLogTime(), r.Method, logPath, modelPart, isStream, clientHost)
 
 	// 动态计算本次请求的最大尝试次数：号池中当前有多少 Key 就至少试多少次
 	// 绝不在还有健康可用 Key 时因固定重试次数上限而过早放弃
@@ -1024,7 +1025,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 				log.Printf("%s [超时] 响应等待超时 (%.2fs) | %s", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState))
 				s.pool.MarkCooldown(keyState, "timeout_awaiting_headers", 15*time.Second)
 				if s.pool.HasAvailableKeys() {
-					log.Printf("%s [切号] %s 响应超时，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+					logKeySwitch(s.pool.displayNameOf(keyState), "响应超时，立即切换至下一 Key")
 					continue
 				}
 				http.Error(w, fmt.Sprintf(`{"error":{"message":"上游响应超时 (%.2fs): %v","type":"upstream_timeout"}}`, ttfbSec, reqErr), http.StatusGatewayTimeout)
@@ -1035,7 +1036,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			log.Printf("%s [失败] 连接异常 (%.2fs) | %s | %v", formatLogTime(), ttfbSec, s.pool.displayNameOf(keyState), reqErr)
 			s.pool.MarkCooldown(keyState, reqErr.Error(), 15*time.Second)
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] %s 连接异常，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				logKeySwitch(s.pool.displayNameOf(keyState), "连接异常，立即切换至下一 Key")
 				continue
 			}
 			http.Error(w, fmt.Sprintf(`{"error":{"message":"连接 Agnes 上游失败: %v","type":"upstream_connect_error"}}`, reqErr), http.StatusBadGateway)
@@ -1053,7 +1054,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			s.pool.MarkCooldown(keyState, "429_rate_limit", retryDuration)
 
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] %s 触发限流，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				logKeySwitch(s.pool.displayNameOf(keyState), "触发限流，立即切换至下一 Key")
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1069,7 +1070,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			s.pool.RemoveKey(keyState.Key, "401_unauthorized")
 
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] %s 凭证失效(401)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				logKeySwitch(s.pool.displayNameOf(keyState), "凭证失效(401)，立即切换至下一 Key")
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1099,7 +1100,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 					formatLogTime(), ttfbSec, modelPart, disp, sanitizeUpstreamBody(errBytes))
 				s.pool.RemoveKey(keyState.Key, reason)
 				if s.pool.HasAvailableKeys() {
-					log.Printf("%s [切号] %s 已被上游封禁，立即切换至下一 Key", formatLogTime(), disp)
+					logKeySwitch(disp, "已被上游封禁，立即切换至下一 Key")
 					continue
 				}
 				s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1114,7 +1115,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 				logAllUnavailable()
 			}
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] %s 被上游拒绝(403)，立即切换至下一 Key", formatLogTime(), s.pool.displayNameOf(keyState))
+				logKeySwitch(s.pool.displayNameOf(keyState), "被上游拒绝(403)，立即切换至下一 Key")
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)
@@ -1145,7 +1146,7 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			s.pool.MarkCooldown(keyState, fmt.Sprintf("http_%d", resp.StatusCode), 15*time.Second)
 
 			if s.pool.HasAvailableKeys() {
-				log.Printf("%s [切号] 上游服务异常(%d)，立即切换至下一 Key", formatLogTime(), resp.StatusCode)
+				logKeySwitch("", fmt.Sprintf("上游服务异常(%d)，立即切换至下一 Key", resp.StatusCode))
 				continue
 			}
 			s.writeUpstreamError(w, resp.StatusCode, errBytes)

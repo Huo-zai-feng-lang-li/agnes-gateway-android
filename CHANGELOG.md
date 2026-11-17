@@ -2,14 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [v1.0.16] - 2026-11-17
+## [v1.0.17] - 2026-11-17
 
 ### 优化
-- **模型名日志简写**：`agnes-3.0-flash` 显示为 `A3F`，`agnes-2.5-flash` 显示为 `A2.5F`，`agnes-3.0-pro` 显示为 `A3P`；多段后缀取首字母，如 `agnes-3.0-flash-preview` 显示为 `A3FP`。
-- 非 Agnes 模型（如 `gpt-4o`）保持原名，空模型继续显示 `default`；日志高亮同步适配简写。
+- **去掉 `[请求]` 入口日志**：实时日志不再为每次请求单独占一行，减少刷屏。
+- **换号分割线**：每一条 `[切号]` 后追加一条灰色 `────────` 分割线，让新账号的 `[成功]/[完成]` 与旧账号日志明显分开；成功与完成属于同一次请求，不再额外插线。
+- Android 日志渲染同步把分割线显示为灰色。
 
 ### 验证
-- 新增 `shortModelName` 单测，覆盖大小写、2.5 版本、多段后缀、非 Agnes 模型与空值；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- `go test -count=1 ./...` 与 `go vet ./...` 通过。
 
 ## [v1.0.16] - 2026-11-17
 
@@ -233,6 +234,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.17]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17
 [v1.0.16]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.16
 [v1.0.15]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
 [v1.0.13]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
