@@ -168,10 +168,14 @@
     - 状态卡与下方三个模块的 `layout_marginTop` 统一为 8dp，`paddingTop` 统一为 8dp。
     - 外层卡片圆角由 8dp 改为 3dp。
     - 版本递增至 **versionCode 23 / versionName 1.0.23**。
+43. **README 极简化并加入截图**
+    - README 从工程说明改为极简版：简介、三张截图、最新 Release 下载、3 步快速开始、说明。
+    - 截图存放于 `docs/screenshots/`：`01-home.webp`、`02-log.webp`、`03-fullscreen.webp`。
 
 ## 未完成 / 下一步
-- v1.0.23 已改完：顶部 8dp 间距统一、外层卡片 3dp 圆角；待 XML 校验、测试、交叉编译、提交、打 tag v1.0.23 并发布 Release。
-- v1.0.22 已改完：分隔线无时间前缀且长度减半、根布局四边 8dp、外层卡片 8dp 圆角；已提交并打 tag，CI 构建状态需核对。
+- v1.0.23 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23，APK 7,171,288 B，SHA256 `1F49A45514492EA84096A8AF641D92D92C878B20AF3018AC6040E5ADE37385CF`。
+- README 已改为极简版，并加入 `docs/screenshots/01-home.webp`、`02-log.webp`、`03-fullscreen.webp` 三张界面截图（待提交）。
+- v1.0.22 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.22
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
