@@ -46,14 +46,13 @@ func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
 }
 
-// logKeySwitch 输出换号日志，并跟一条分割线；新账号的成功/完成会与旧账号日志分开。
+// logKeySwitch 输出换号日志，便于定位账号切换；正常成功只保留一行，失败仍单独记录。
 func logKeySwitch(keyDisplay, message string) {
 	if keyDisplay != "" {
 		log.Printf("%s [切号] %s %s", formatLogTime(), keyDisplay, message)
 	} else {
 		log.Printf("%s [切号] %s", formatLogTime(), message)
 	}
-	log.Printf("%s ──────────────────────────────", formatLogTime())
 }
 
 // 上游错误体只用于日志取证，写入前统一截断并抹掉可能回显的凭证
@@ -1172,11 +1171,6 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 响应头一到就记「成功」，保证每次 2xx 调用都有迹可查；
-		// 后续正文若断流/客户端断开，再追加 [断流] / [中断] 说明结果。
-		log.Printf("%s [成功] HTTP %d %.2fs | %s | %s | stream=%v",
-			formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), isSSE)
-
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
 		var sentBytes int64
@@ -1212,10 +1206,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 
 		elapsedSec := time.Since(reqStart).Seconds()
 		if readErr == io.EOF {
-			if isSSE {
-				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %s · 约 %d 字) | %s | %s",
-					formatLogTime(), elapsedSec, formatByteSize(sentBytes), estimateCharCount(sentBytes), modelPart, s.pool.displayNameOf(keyState))
-			}
+			// 正常成功只留这一行：状态码、总耗时、模型、Key 尾号、下发数据量。
+			log.Printf("%s [成功] %d %.2fs | %s | %s | %s · 约 %d 字",
+				formatLogTime(), resp.StatusCode, elapsedSec, modelPart, s.pool.displayNameOf(keyState),
+				formatByteSize(sentBytes), estimateCharCount(sentBytes))
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
 			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",

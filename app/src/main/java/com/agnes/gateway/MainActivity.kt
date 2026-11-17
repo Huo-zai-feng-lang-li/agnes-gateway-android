@@ -833,9 +833,7 @@ class MainActivity : AppCompatActivity() {
             msg.contains("[超时]") || msg.contains("[避让]") || msg.contains("[风控]") -> 0xFFFFB74D.toInt() // 橙黄色
             msg.contains("[切号]") -> 0xFF00E5FF.toInt() // 青色
             msg.contains("[中断]") -> 0xFF8B949E.toInt() // 灰色
-            msg.contains("────") -> 0xFF8B949E.toInt() // 换号分割线灰色
             msg.contains("[成功]") -> 0xFF3FB950.toInt() // 成功：鲜绿色
-            msg.contains("[完成]") -> 0xFF79C0FF.toInt() // 完成：浅蓝色，与成功区分
             msg.contains("[告警]") -> 0xFFFF1744.toInt() // 警示红
             msg.startsWith("[系统]") || msg.startsWith("[DNS]") -> 0xFF58A6FF.toInt() // 系统蓝
             msg.startsWith("===") -> 0xFF8B949E.toInt()
@@ -851,12 +849,11 @@ class MainActivity : AppCompatActivity() {
             sp.setSpan(ForegroundColorSpan(0xFF8B949E.toInt()), it.range.first, it.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
-        // 2. 状态标签特殊高亮 [请求] / [成功] / [完成] / [风控] / [拒绝] / [断流] / [切号] / [告警] / [xxx]
+        // 2. 状态标签特殊高亮 [成功] / [风控] / [拒绝] / [断流] / [切号] / [告警] / [xxx]
         PATTERN_TAG.findAll(msg).forEach {
             val tag = it.value
             val tagColor = when {
                 tag == "[成功]" || tag.matches(PATTERN_TAG_2XX) -> 0xFF3FB950.toInt()
-                tag == "[完成]" -> 0xFF79C0FF.toInt()
                 tag == "[限流]" || tag == "[429]" || tag == "[超时]" || tag == "[避让]" || tag == "[风控]" -> 0xFFFFB74D.toInt()
                 tag == "[切号]" -> 0xFF00E5FF.toInt()
                 tag == "[中断]" -> 0xFF8B949E.toInt()
@@ -1042,7 +1039,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private val PATTERN_TS = Regex("""^\d{2}:\d{2}:\d{2}""")
         private val PATTERN_FULL_TS = Regex("""^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}""")
-        private val PATTERN_TAG = Regex("""\[(请求|成功|完成|断流|拒绝|风控|限流|超时|避让|切号|中断|封禁|失败|系统|告警|\d{3})\]""")
+        private val PATTERN_TAG = Regex("""\[(成功|断流|拒绝|风控|限流|超时|避让|切号|中断|封禁|失败|系统|告警|\d{3})\]""")
         private val PATTERN_TAG_2XX = Regex("""\[2\d{2}\]""")
         private val PATTERN_TAG_ERR = Regex("""\[[45]\d{2}\]""")
         private val PATTERN_TTFB = Regex("""\b\d+\.\d{2}s\b""")
