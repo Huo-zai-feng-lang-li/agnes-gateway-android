@@ -176,10 +176,14 @@
     - “运行中”文字偏大的根因：8dp 只是卡片 padding，40dp 波纹视图和 Material 按钮 48dp 最小高度共同把行高撑到 48dp，文字被垂直居中后视觉顶部留白约 20dp。
     - 修正：波纹视图 40→32dp（动画半径仍 18dp，行 `clipChildren=false`）；按钮 `minHeight/minWidth=0`、上下 padding 0；状态卡顶部 padding 4dp。
     - 版本递增至 **versionCode 25 / versionName 1.0.25**（按规则跳过 1.0.24）。
+45. **v1.0.26：圆角与顶部间距微调**
+    - 外层卡片圆角 5dp → 6dp。
+    - 状态卡顶部内边距 4dp → 6dp。
+    - 版本递增至 **versionCode 26 / versionName 1.0.26**。
 
 ## 未完成 / 下一步
+- v1.0.26 已改完：卡片圆角 6dp、状态卡顶部 6dp；待 XML 校验、提交、打 tag v1.0.26 并发布 Release。
 - v1.0.25 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.25，APK 7,171,368 B，SHA256 `2ADACA43B3271CDFA5597A6E787B6210192D9B127C8B418EB929F2EB9AE76DB2`。
-- v1.0.23 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.23，APK 7,171,288 B，SHA256 `1F49A45514492EA84096A8AF641D92D92C878B20AF3018AC6040E5ADE37385CF`。
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
