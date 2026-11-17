@@ -11,6 +11,9 @@
 
 ### 验证
 - `go test -count=1 ./...` 与 `go vet ./...` 通过。
+- GitHub Actions：main CI `44113545072` 成功；tag CI `44114150092` 成功并发布 Release。
+- Release APK：`AgnesGateway-v1.0.17.apk`，7,169,304 B，SHA256 `AF11E42D80BC3BFECF38644A874D674D3DC4C63C6FBC69BB7E81C476363B7B68`（本地下载核对一致）。
+- arm64 内核 SHA256：`7B34022262D8A76E5F9F01A0DBC8D694779E1412C092D59C86B3A8A093E3D17A`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致，APK 内嵌内核经字符串核验为 v1.0.17 版本。
 
 ## [v1.0.16] - 2026-11-17
 

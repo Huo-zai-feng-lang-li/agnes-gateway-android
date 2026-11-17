@@ -139,7 +139,9 @@
     - 版本递增至 **versionCode 17 / versionName 1.0.17**。
 
 ## 未完成 / 下一步
-- v1.0.17 代码已改完，待交叉编译 arm64、同步 jniLibs、提交、推送 main、打 tag v1.0.17 并由 GitHub Actions 发布 Release。
+- v1.0.17 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17
+- Release 资产：`AgnesGateway-v1.0.17.apk`（7,169,304 B，sha256 `AF11E42D80BC3BFECF38644A874D674D3DC4C63C6FBC69BB7E81C476363B7B68`，本地下载核对一致）。
+- v1.0.17 待真机验收：成功只保留一行、状态码/总耗时/模型简写/Key 尾号/数据量与预估字数、失败与断流仍可见。
 - v1.0.16 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.16
 - Release 资产：`AgnesGateway-v1.0.16.apk`（7,170,460 B，sha256 `345EFB7727AB6A909D510C03CEC543E53EF6087211A589F8B89328A88C910C36`）。
 - v1.0.15 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
