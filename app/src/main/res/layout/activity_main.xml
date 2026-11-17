@@ -9,7 +9,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="8dp">
 
         <!-- 标题卡片 -->
         <TextView

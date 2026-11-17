@@ -142,8 +142,14 @@
     - 波纹线宽 1.2dp → 1.5dp，透明度上限 110 → 140；不改变动画时长和触发逻辑。
     - 仅 Android UI 改动，Go 网关逻辑沿用 v1.0.17。
     - 版本递增至 **versionCode 18 / versionName 1.0.18**。
+38. **v1.0.19：收紧页面外侧留白**
+    - 根布局左右 padding 16dp → 12dp，底部 padding 16dp → 8dp，顶部保持 16dp。
+    - 卡片内部 padding 与卡片间距不变，避免正文过挤。
+    - 仅 Android 布局改动，Go 网关逻辑沿用 v1.0.17。
+    - 版本递增至 **versionCode 19 / versionName 1.0.19**。
 
 ## 未完成 / 下一步
+- v1.0.19 已改完：页面左右 padding 16dp → 12dp、底部 16dp → 8dp，待提交、打 tag v1.0.19 并由 GitHub Actions 发布 Release。
 - v1.0.18 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
 - Release 资产：`AgnesGateway-v1.0.18.apk`（7,169,300 B，sha256 `7F98FC8211A370E79B20D078A194331616477441916128F8646CA232D1E9DAF2`，本地下载核对一致）。
 - v1.0.18 待真机验收：顶部“运行中”水波纹放大后的视觉大小与文字间距。

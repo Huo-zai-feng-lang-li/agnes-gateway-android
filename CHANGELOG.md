@@ -2,6 +2,16 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.19] - 2026-11-17
+
+### 优化
+- **页面外侧留白收紧**：根布局左右 padding 由 16dp 改为 12dp，底部 padding 由 16dp 改为 8dp，顶部保持 16dp。
+- 卡片内部 padding、卡片之间的 16dp 间距保持不变，避免内容过挤；只让页面更贴近屏幕左右边缘和底部。
+- 仅 Android 布局改动，Go 网关逻辑沿用 v1.0.17。
+
+### 验证
+- Android 由 GitHub Actions 编译验证；Go 网关二进制沿用 v1.0.17（本次未改 Go 代码）。
+
 ## [v1.0.18] - 2026-11-17
 
 ### 优化
@@ -249,6 +259,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.19]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
 [v1.0.18]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
 [v1.0.17]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17
 [v1.0.16]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.16
