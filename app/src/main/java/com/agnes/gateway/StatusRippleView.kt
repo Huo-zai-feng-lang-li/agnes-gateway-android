@@ -21,8 +21,8 @@ class StatusRippleView @JvmOverloads constructor(
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val density = resources.displayMetrics.density
-    private val dotRadius = 3.5f * density
-    private val maxRadius = 12f * density
+    private val dotRadius = 4.5f * density
+    private val maxRadius = 18f * density
     private var rippleAnimator: ValueAnimator? = null
     private var progress = 0f
     private var rippleColor = 0xFF00C853.toInt()
@@ -81,9 +81,9 @@ class StatusRippleView @JvmOverloads constructor(
 
     private fun drawRing(canvas: Canvas, cx: Float, cy: Float, phase: Float) {
         val radius = dotRadius + (maxRadius - dotRadius) * phase
-        val alpha = ((1f - phase) * 110f).toInt().coerceIn(0, 255)
+        val alpha = ((1f - phase) * 140f).toInt().coerceIn(0, 255)
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.2f * density
+        paint.strokeWidth = 1.5f * density
         paint.color = Color.argb(
             alpha,
             Color.red(rippleColor),

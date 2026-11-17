@@ -22,8 +22,8 @@ android {
         applicationId = "com.agnes.gateway"
         minSdk = 24
         targetSdk = 34
-        versionCode = 17
-        versionName = "1.0.17"
+        versionCode = 18
+        versionName = "1.0.18"
 
         ndk {
             abiFilters.add("arm64-v8a")

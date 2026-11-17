@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.18] - 2026-11-17
+
+### 优化
+- **顶部“运行中”水波纹放大**：状态视图由 28dp 提升到 40dp，中心圆点由 3.5dp 提升到 4.5dp，波纹最大半径由 12dp 提升到 18dp，线宽与透明度同步增强，运行中动效更醒目但不挤压文字。
+- 仅调整 Android 状态动效，Go 网关日志逻辑与 v1.0.17 保持一致。
+
+### 验证
+- Android 由 GitHub Actions 编译验证；Go 网关二进制沿用 v1.0.17（本次未改 Go 代码）。
+
 ## [v1.0.17] - 2026-11-17
 
 ### 优化
@@ -237,6 +246,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.18]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
 [v1.0.17]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.17
 [v1.0.16]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.16
 [v1.0.15]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
