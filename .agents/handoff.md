@@ -124,7 +124,9 @@
     - 版本递增至 **versionCode 15 / versionName 1.0.15**。
 
 ## 未完成 / 下一步
-- v1.0.15 代码已改完，待交叉编译 arm64、同步 jniLibs、提交、推送 main、打 tag v1.0.15 并由 GitHub Actions 发布 Release。
+- v1.0.15 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
+- Release 资产：`AgnesGateway-v1.0.15.apk`（7,168,884 B，sha256 `29C18618F161430A01E14A3EE2236C51D5342CE6292F826E839F95B68951058E`）。
+- 待用户在真机验收：顶部水波纹+运行时长、`[成功]/[完成]` 分色、`下发 KB/MB` 显示。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）

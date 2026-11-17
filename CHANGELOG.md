@@ -11,6 +11,9 @@
 
 ### 验证
 - 新增 `formatByteSize` 单测（0 B、999 B、1.0 KB、6.7 KB、1.0 MB、3.0 MB）；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+- GitHub Actions：main CI `44104309143` 成功；tag CI `44105221201` 成功并发布 Release。
+- Release APK：`AgnesGateway-v1.0.15.apk`，7,168,884 B，SHA256 `29C18618F161430A01E14A3EE2236C51D5342CE6292F826E839F95B68951058E`（本地下载核对一致）。
+- arm64 内核 SHA256：`11BB12039045C65DD0A45BDF5E82D03B04233A86B2992DE402CC7C34CCA687D8`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
 
 ## [v1.0.13] - 2026-11-17
 
