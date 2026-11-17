@@ -106,11 +106,18 @@
     - 真实端到端：风控 Key + 正常 Key 同池连续 4 次请求全部 200，日志依次出现 `[请求]` → `[风控] HTTP 403 ... 冷却 10m0s` → `[切号]` → `[成功] HTTP 200`；仅放风控 Key 时客户端收到 403 原文 + `[告警] 号池全部不可用`，不再出现 `[成功]`。
     - 版本递增至 **versionCode 13 / versionName 1.0.12**；arm64 与 jniLibs SHA256 = `AC2CD7F633E74E9D9523EEE9A120DEE0CB89A1072CEECEFAD9DE50537950613F`（两侧一致）。
 
+33. **v1.0.13：403 封禁剔除 + 日志可观测性 + UI 精简**
+    - 口径确认：2.5 / 3.0 Flash 为免费模型，仅有每分钟请求限制，403 即 Key 被封。
+    - 403：风控类及免费模型上非额度/权限/网段的 403 不再冷却，直接 `RemoveKey` 物理剔除并记入封禁黑名单；有可用 Key 立即 `[切号]`，全池被封才回传上游 403。客户端沿用 `[封禁] ... 已从号池剔除` 自动清理本地配置。
+    - 备注：Go 删除 `KeyState.Alias`，`parseKeyEntry` 只取 Key 并丢弃旧后缀，展示只保留尾 4 位掩码；Android 删除号池备注文案、hint、脚注，旧配置加载时自动剥离备注。
+    - UI：删除顶部“封禁”指标卡（内部 `banned_keys` 保留用于全池告警）；日志正文不再点击横屏，只有“全屏”按钮触发；顶部 `tvStatus` 改为运行中呼吸 + 成功缩放/失败抖动动效。
+    - 日志：`GatewayService` 增加 500 条/30 分钟环形缓存与 `seq/time` 广播字段，App 回前台补拉并去重；2xx 在 `w.WriteHeader` 后立即记 `[成功]`，流式结束追加 `[完成]`；启动命令 `--keys=***` 脱敏。
+    - 测试：新增免费模型通用 403 封禁用例；403 风控用例改为断言 Key 被物理剔除。`go test -count=1 ./...` 与 `go vet ./...` 通过。
+    - 版本递增至 **versionCode 14 / versionName 1.0.13**；arm64 与 jniLibs SHA256 = `13AC18D443988C72CCBAE49C7860905D3A46B7CFB2F65855E25FCC60CB964768`（两侧一致）。
+
 ## 未完成 / 下一步
-- v1.0.12 已提交（f2201be）、推送 main、打 tag 并发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
-- Release 资产：`AgnesGateway-v1.0.12.apk`（7,161,696 B，sha256 `99a16f249916887a84e78c9900f4364250bf06e44ed6fda62f90f7ef6750925d`）。
-- CI 运行 44092683114（tag v1.0.12）success，44092653879（main）success。
-- 用户侧：安装 v1.0.12 覆盖升级即可；`sk-qSp...RaNO` 若长期 403，建议直接从号池移除。
+- v1.0.13 代码已改完，待提交、交叉编译 arm64、同步 jniLibs、推送 main、打 tag v1.0.13 并由 GitHub Actions 发布 Release。
+- 用户侧：安装 v1.0.13 覆盖升级；旧配置里的 `#备注` 会自动剥离。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）

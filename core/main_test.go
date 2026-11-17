@@ -40,7 +40,7 @@ func TestPoolManager_NormalizationAndMask(t *testing.T) {
 	}
 }
 
-func TestPoolManager_AliasParsing(t *testing.T) {
+func TestPoolManager_KeySuffixIgnored(t *testing.T) {
 	pool := NewPoolManager("https://apihub.agnes-ai.cn", 60)
 	pool.SetKeys([]string{
 		"sk-1234567890abcdef#主力号",
@@ -54,17 +54,11 @@ func TestPoolManager_AliasParsing(t *testing.T) {
 		t.Fatalf("expected 4 keys, got %d", len(list))
 	}
 
-	if list[0].Alias != "主力号" || list[0].DisplayName != "主力号(...cdef)" {
-		t.Fatalf("alias 1 mismatch: %s / %s", list[0].Alias, list[0].DisplayName)
-	}
-	if list[1].Alias != "备用号" || list[1].DisplayName != "备用号(...dcba)" {
-		t.Fatalf("alias 2 mismatch: %s / %s", list[1].Alias, list[1].DisplayName)
-	}
-	if list[2].Alias != "应急号" || list[2].DisplayName != "应急号(...7890)" {
-		t.Fatalf("alias 3 mismatch: %s / %s", list[2].Alias, list[2].DisplayName)
-	}
-	if list[3].Alias != "" || list[3].DisplayName != "...5678" {
-		t.Fatalf("alias 4 mismatch: %s / %s", list[3].Alias, list[3].DisplayName)
+	want := []string{"...cdef", "...dcba", "...7890", "...5678"}
+	for i, w := range want {
+		if list[i].DisplayName != w {
+			t.Fatalf("key %d display mismatch: got %q, want %q", i, list[i].DisplayName, w)
+		}
 	}
 }
 
@@ -579,7 +573,7 @@ func TestClassify403(t *testing.T) {
 	}
 }
 
-// 风控 Key 返回 403 时必须冷却并切到健康 Key，不能让客户端拿到 403 终止长任务
+// 风控 Key 返回 403 时必须从号池剔除并切到健康 Key，不能让客户端拿到 403 终止长任务
 func TestGatewayServer_403RiskControlFailover(t *testing.T) {
 	reqCount := 0
 	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +607,48 @@ func TestGatewayServer_403RiskControlFailover(t *testing.T) {
 		t.Fatalf("expected 2 upstream requests (403 + 200), got %d", reqCount)
 	}
 	if pool.AvailableCount() != 1 {
-		t.Fatalf("expected risk key cooled, 1 available key left, got %d", pool.AvailableCount())
+		t.Fatalf("expected risk key banned, 1 available key left, got %d", pool.AvailableCount())
+	}
+	if pool.TotalCount() != 1 {
+		t.Fatalf("expected risk key physically removed, total 1 left, got %d", pool.TotalCount())
+	}
+	banned := pool.BannedKeys()
+	if len(banned) != 1 || banned[0] != "risk-key" {
+		t.Fatalf("expected risk-key banned, got %v", banned)
+	}
+}
+
+// 免费模型上非额度/权限/网段的通用 403 也按封禁剔除号池
+func TestGatewayServer_403GenericFreeModelBansKey(t *testing.T) {
+	upstreamMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer dead-key" {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"message":"forbidden"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n"))
+	}))
+	defer upstreamMock.Close()
+
+	pool := NewPoolManager(upstreamMock.URL, 60)
+	pool.SetKeys([]string{"dead-key", "good-key"})
+	server := NewGatewayServer(pool, 8080, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"agnes-3.0-flash","stream":true}`))
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after banning dead key, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	if pool.TotalCount() != 1 || pool.AvailableCount() != 1 {
+		t.Fatalf("expected dead key removed and 1 healthy key left, total=%d available=%d", pool.TotalCount(), pool.AvailableCount())
+	}
+	banned := pool.BannedKeys()
+	if len(banned) != 1 || banned[0] != "dead-key" {
+		t.Fatalf("expected dead-key banned, got %v", banned)
 	}
 }
 
@@ -640,7 +675,13 @@ func TestGatewayServer_403AllKeysReturnsUpstreamError(t *testing.T) {
 		t.Fatalf("expected upstream 403 body preserved, got: %s", rr.Body.String())
 	}
 	if pool.AvailableCount() != 0 {
-		t.Fatalf("expected all keys cooled, got %d available", pool.AvailableCount())
+		t.Fatalf("expected all keys physically removed, got %d available", pool.AvailableCount())
+	}
+	if pool.TotalCount() != 0 {
+		t.Fatalf("expected all keys removed from pool, got %d total", pool.TotalCount())
+	}
+	if len(pool.BannedKeys()) != 2 {
+		t.Fatalf("expected both risk keys banned, got %v", pool.BannedKeys())
 	}
 }
 

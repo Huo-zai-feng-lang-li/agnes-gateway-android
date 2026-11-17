@@ -15,7 +15,11 @@ import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.util.ArrayDeque
 import kotlin.concurrent.thread
+
+/** 服务端缓存的一条日志，seq 用于界面去重，timeMs 用于过期裁剪。 */
+data class GatewayLogEntry(val seq: Long, val timeMs: Long, val line: String)
 
 class GatewayService : Service() {
 
@@ -38,10 +42,55 @@ class GatewayService : Service() {
         const val EXTRA_KEYS = "extra_keys"
         const val EXTRA_DNS = "extra_dns"
         const val EXTRA_LOG_LINE = "extra_log_line"
+        const val EXTRA_LOG_SEQ = "extra_log_seq"
+        const val EXTRA_LOG_TIME = "extra_log_time"
+
+        private const val MAX_LOG_LINES = 500
+        private const val MAX_LOG_AGE_MS = 30 * 60 * 1000L
+
+        private val logBuffer = ArrayDeque<GatewayLogEntry>()
+        private var logSeq = 0L
 
         @Volatile
         var isRunning: Boolean = false
             private set
+
+        /** 记录日志到环形缓存并返回带序号的条目。 */
+        @Synchronized
+        private fun recordLog(msg: String): GatewayLogEntry {
+            val now = System.currentTimeMillis()
+            pruneLogBufferLocked(now)
+            val entry = GatewayLogEntry(++logSeq, now, msg)
+            logBuffer.addLast(entry)
+            while (logBuffer.size > MAX_LOG_LINES) {
+                logBuffer.removeFirst()
+            }
+            return entry
+        }
+
+        @Synchronized
+        private fun pruneLogBufferLocked(now: Long) {
+            while (logBuffer.isNotEmpty() && now - logBuffer.first().timeMs > MAX_LOG_AGE_MS) {
+                logBuffer.removeFirst()
+            }
+        }
+
+        /** 供界面回前台时补拉错过的日志。 */
+        @Synchronized
+        fun snapshotLogs(afterSeq: Long): List<GatewayLogEntry> {
+            pruneLogBufferLocked(System.currentTimeMillis())
+            return logBuffer.filter { it.seq > afterSeq }
+        }
+
+        /** 清空服务端日志缓存，序号保持单调递增，避免与界面去重序号冲突。 */
+        @Synchronized
+        fun clearLogBuffer() {
+            logBuffer.clear()
+        }
+
+        /** 当前日志最大序号；小于界面记录的序号说明服务已重启。 */
+        @Synchronized
+        fun latestLogSeq(): Long = logSeq
 
         fun triggerAllKeysUnavailableAlert(context: Context) {
             try {
@@ -195,7 +244,7 @@ class GatewayService : Service() {
                     cmdList.add("--dns=$dns")
                 }
 
-                broadcastLog("[系统] 启动命令: ${cmdList.joinToString(" ")}")
+                broadcastLog("[系统] 启动命令: ${cmdList.map { if (it.startsWith("--keys=")) "--keys=***" else it }.joinToString(" ")}")
                 val processBuilder = ProcessBuilder(cmdList)
                 processBuilder.redirectErrorStream(true)
 
@@ -244,8 +293,11 @@ class GatewayService : Service() {
     }
 
     private fun broadcastLog(msg: String) {
+        val entry = recordLog(msg)
         val intent = Intent(ACTION_LOG_BROADCAST)
         intent.putExtra(EXTRA_LOG_LINE, msg)
+        intent.putExtra(EXTRA_LOG_SEQ, entry.seq)
+        intent.putExtra(EXTRA_LOG_TIME, entry.timeMs)
         intent.setPackage(packageName)
         sendBroadcast(intent)
     }

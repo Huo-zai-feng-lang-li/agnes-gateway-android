@@ -48,7 +48,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="○ 已停止 (Stopped)"
+                    android:text="○ 已停止"
                     android:textColor="#9E9E9E"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -191,7 +191,6 @@
                     android:id="@+id/tvCooldownKeys"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     android:background="#E65100"
                     android:gravity="center"
@@ -199,20 +198,6 @@
                     android:paddingBottom="6dp"
                     android:text="限流: 0"
                     android:textColor="#FFE082"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvBannedKeys"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:background="#B71C1C"
-                    android:gravity="center"
-                    android:paddingTop="6dp"
-                    android:paddingBottom="6dp"
-                    android:text="封禁: 0"
-                    android:textColor="#FFCDD2"
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -310,7 +295,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Agnes Key 号池 (支持 # 或 ---- 备注名):"
+                    android:text="Agnes Key 号池:"
                     android:textColor="#AAAAAA"
                     android:textSize="12sp" />
 
@@ -332,7 +317,7 @@
                 android:layout_marginTop="4dp"
                 android:background="#2C2C2C"
                 android:gravity="top|start"
-                android:hint="sk-key1#主力号&#10;sk-key2----备用号&#10;sk-key3 应急号"
+                android:hint="sk-key1&#10;sk-key2&#10;sk-key3"
                 android:inputType="textMultiLine"
                 android:padding="10dp"
                 android:scrollbars="vertical"
@@ -344,7 +329,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:text="支持每行 Key 后加 #备注（如 sk-xxx#主力号）；401 封禁自动剔除；运行中修改点右上角热更新生效。"
+                android:text="每行一个 Key；401/403 封禁自动从号池剔除；运行中修改点右上角热更新生效。"
                 android:textColor="#777777"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -395,12 +380,17 @@
                     android:textSize="12sp" />
 
                 <TextView
+                    android:id="@+id/btnFullscreenLog"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
-                    android:text="点击全屏"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:padding="6dp"
+                    android:text="全屏"
                     android:textColor="#58A6FF"
-                    android:textSize="11sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <TextView

@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.13] - 2026-11-17
+
+### 修复与变更
+- **403 风控改为直接封禁剔除号池**：按实际口径，2.5 / 3.0 Flash 为免费模型、仅有每分钟限流，风控 403 说明 Key 已封。网关收到风控 403 后不再冷却 10 分钟重试，而是与 401 一样物理剔除该 Key、记入封禁黑名单并立即切号；免费模型上除额度/模型权限/网段外的通用 403 也按封禁处理。客户端检测到 `[封禁] ... 已从号池剔除` 后继续自动清理本地配置。
+- **彻底移除 Key 备注功能**：Go 侧删除 `KeyState.Alias`，`parseKeyEntry` 只提取 Key 并丢弃旧配置后缀，日志与状态只显示尾 4 位掩码；Android 侧删除“支持 # / ---- 备注名”等全部文案，旧配置在加载时自动剥离备注。
+- **移除顶部“封禁”指标卡**：封禁 Key 已自动从号池删除，不再单独展示；内部 `banned_keys` 计数保留，用于全池封禁告警。
+- **日志仅“全屏”按钮触发横屏**：删除日志正文点击监听，避免上下滑动误触旋转；布局中的静态“点击全屏”改为可点击的“全屏”按钮。
+- **顶部运行状态动效**：运行中绿色呼吸；每次 `[成功]` 闪 `✓ 调用成功` 缩放动效，失败类日志（失败/拒绝/断流/封禁/风控/限流/超时/告警）抖动显示 `✕ 调用失败`，1.6 秒后自动回到运行中。
+- **后台日志不再丢失**：`GatewayService` 增加 500 条 / 30 分钟环形日志缓存，广播附带序号与时间；App 回前台时按序号补拉错过的 `[成功]`、`[封禁]`、`[断流]` 等记录，并按序号去重。
+- **成功日志提前到响应头**：所有 2xx 在 `w.WriteHeader` 后立即记 `[成功] HTTP ... | model | Key | stream=...`，流式结束再追加 `[完成]`，非流式不再等正文复制完才记成功；正文断流仍记 `[断流]`，客户端断开仍记 `[中断]`。
+- **启动命令脱敏**：日志中的 `--keys=` 统一替换为 `--keys=***`，避免完整 Key 广播到界面。
+
+### 验证
+- `go test -count=1 ./...` 通过；新增免费模型通用 403 封禁用例，原有 403 风控切号用例改为断言 Key 被物理剔除。
+- `go vet ./...` 通过。
+- Android 侧需由 GitHub Actions `assembleRelease` 验证 Kotlin 编译与 APK 构建。
+
 ## [v1.0.12] - 2026-11-17
 
 ### 修复（关键）
@@ -180,6 +197,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.13]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
 [v1.0.12]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.10

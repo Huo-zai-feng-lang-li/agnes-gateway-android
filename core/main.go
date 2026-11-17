@@ -84,6 +84,16 @@ func readUpstreamError(body io.Reader) []byte {
 	return b
 }
 
+// isFreeModel 判断是否为免费模型（2.5 / 3.0 Flash）。免费模型没有额度限制，
+// 除明确额度/模型权限/网段问题外的 403 一律视为 Key 被封。
+func isFreeModel(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(lower, "2.5") ||
+		strings.Contains(lower, "3.0-flash") ||
+		strings.Contains(lower, "3.0 flash") ||
+		strings.Contains(lower, "3.0flash")
+}
+
 func containsAny(text string, needles ...string) bool {
 	for _, n := range needles {
 		if strings.Contains(text, n) {
@@ -115,7 +125,6 @@ func classify403(body string) (tag string, reason string, cooldown time.Duration
 type KeyState struct {
 	// Key 为上游明文凭证，禁止出现在任何 JSON 输出中（管理接口虽限本机回环，仍不应出网）
 	Key          string    `json:"-"`
-	Alias        string    `json:"alias"`
 	MaskedKey    string    `json:"masked_key"`
 	DisplayName  string    `json:"display_name"`
 	CooldownTill time.Time `json:"cooldown_till"`
@@ -125,43 +134,36 @@ type KeyState struct {
 	Disabled     bool      `json:"disabled"`
 }
 
-// parseKeyEntry 解析包含可选备注名的 Key 行
-// 支持格式：
-// 1) sk-xxxx#备注名
-// 2) sk-xxxx----备注名
-// 3) sk-xxxx:备注名
-// 4) sk-xxxx 备注名
-// 5) 裸 sk-xxxx
-func parseKeyEntry(raw string) (string, string) {
+// parseKeyEntry 从一行输入中提取 Key。
+// 备注功能已移除；兼容旧配置里的 # / ---- / 空格 / 冒号后缀，解析时直接丢弃后缀。
+func parseKeyEntry(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", ""
+		return ""
 	}
 
 	delimiters := []string{"----", "#", " ", "\t"}
 	for _, delim := range delimiters {
 		if idx := strings.Index(raw, delim); idx > 0 {
 			key := strings.TrimSpace(raw[:idx])
-			alias := strings.TrimSpace(raw[idx+len(delim):])
 			if key != "" {
-				return key, alias
+				return key
 			}
 		}
 	}
-	// 尝试单个英文冒号分隔（避免与 url 冲突，key 通常不含 :）
+	// 兼容旧配置的英文冒号分隔（避免与 url 冲突，key 通常不含 :）
 	if idx := strings.Index(raw, ":"); idx > 0 && !strings.Contains(raw[:idx], "/") {
 		key := strings.TrimSpace(raw[:idx])
-		alias := strings.TrimSpace(raw[idx+1:])
 		if key != "" {
-			return key, alias
+			return key
 		}
 	}
 
-	return raw, ""
+	return raw
 }
 
-// formatKeyDisplayName 格式化 Key 展示名称：截取末尾字符，有备注时展示备注
-func formatKeyDisplayName(key, alias string) (string, string) {
+// formatKeyDisplayName 只保留 Key 末尾 4 位掩码，不再展示任何备注名
+func formatKeyDisplayName(key string) (string, string) {
 	key = strings.TrimSpace(key)
 	var masked string
 	if len(key) <= 8 {
@@ -169,10 +171,6 @@ func formatKeyDisplayName(key, alias string) (string, string) {
 	} else {
 		// 截取末尾 4 个字符，如 ...piLR
 		masked = "..." + key[len(key)-4:]
-	}
-
-	if alias != "" {
-		return fmt.Sprintf("%s(%s)", alias, masked), masked
 	}
 	return masked, masked
 }
@@ -242,22 +240,20 @@ func (p *PoolManager) SetKeys(rawEntries []string) {
 	var newKeys []*KeyState
 	seen := make(map[string]bool)
 	for _, entry := range rawEntries {
-		k, alias := parseKeyEntry(entry)
+		k := parseKeyEntry(entry)
 		if k == "" || seen[k] {
 			continue
 		}
 		seen[k] = true
-		disp, masked := formatKeyDisplayName(k, alias)
+		disp, masked := formatKeyDisplayName(k)
 
 		if old, exists := keyMap[k]; exists {
-			old.Alias = alias
 			old.DisplayName = disp
 			old.MaskedKey = masked
 			newKeys = append(newKeys, old)
 		} else {
 			newKeys = append(newKeys, &KeyState{
 				Key:         k,
-				Alias:       alias,
 				MaskedKey:   masked,
 				DisplayName: disp,
 			})
@@ -423,7 +419,7 @@ func (p *PoolManager) displayNameOf(ks *KeyState) string {
 	return ks.DisplayName
 }
 
-// RemoveKey 检测到 401 封禁时从号池中物理剔除该 Key，并记入封禁黑名单
+// RemoveKey 检测到 401 凭证失效或 403 风控封禁时从号池中物理剔除该 Key，并记入封禁黑名单
 func (p *PoolManager) RemoveKey(key string, errReason string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -443,7 +439,11 @@ func (p *PoolManager) RemoveKey(key string, errReason string) bool {
 	if removed {
 		p.keys = updated
 		p.bannedKeys = append(p.bannedKeys, key)
-		log.Printf("%s [封禁] 401 凭证失效 | Key: %s -> 已从号池剔除", formatLogTime(), targetDisp)
+		detail := "401 凭证失效"
+		if strings.Contains(errReason, "403") {
+			detail = "403 风控封禁"
+		}
+		log.Printf("%s [封禁] %s | Key: %s -> 已从号池剔除", formatLogTime(), detail, targetDisp)
 		if p.allUnavailableLocked(time.Now()) {
 			logAllUnavailable()
 		}
@@ -1033,6 +1033,28 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			lastErrBody = errBytes
 
 			tag, reason, cooldown := classify403(string(errBytes))
+			if isFreeModel(reqModel) &&
+				reason != "403_quota" && reason != "403_model_forbidden" && reason != "403_ip_restricted" {
+				// 免费模型仅有分钟级限流；非额度/权限/网段的 403 说明该 Key 已被封
+				tag, reason = "风控", "403_risk_control"
+			}
+
+			// 2.5 / 3.0 Flash 为免费模型，仅有每分钟限流；出现风控 403 代表该 Key 已被封，
+			// 与 401 一样直接剔除号池并触发客户端本地清理，避免长任务反复选中死号。
+			if reason == "403_risk_control" {
+				disp := s.pool.displayNameOf(keyState)
+				log.Printf("%s [风控] HTTP 403 (%.2fs) | %s | Key: %s | 已封禁 | %s",
+					formatLogTime(), ttfbSec, modelPart, disp, sanitizeUpstreamBody(errBytes))
+				s.pool.RemoveKey(keyState.Key, reason)
+				if s.pool.HasAvailableKeys() {
+					log.Printf("%s [切号] Key: %s 已被上游封禁，立即切换至下一 Key", formatLogTime(), disp)
+					continue
+				}
+				s.writeUpstreamError(w, resp.StatusCode, errBytes)
+				return
+			}
+
+			// 额度、模型权限、网段等 403 仍按 Key 级冷却处理，冷却后再观察是否恢复
 			dead := s.pool.applyCooldown(keyState, reason, cooldown)
 			log.Printf("%s [%s] HTTP 403 (%.2fs) | %s | Key: %s | 冷却 %v | %s",
 				formatLogTime(), tag, ttfbSec, modelPart, s.pool.displayNameOf(keyState), cooldown, sanitizeUpstreamBody(errBytes))
@@ -1097,10 +1119,10 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 流式请求先记首字时间；非流式在正文复制完后统一记总耗时与字节数
-		if isSSE {
-			log.Printf("%s [成功] %.2fs | %s | Key: %s | stream", formatLogTime(), ttfbSec, modelPart, s.pool.displayNameOf(keyState))
-		}
+		// 响应头一到就记「成功」，保证每次 2xx 调用都有迹可查；
+		// 后续正文若断流/客户端断开，再追加 [断流] / [中断] 说明结果。
+		log.Printf("%s [成功] HTTP %d %.2fs | %s | Key: %s | stream=%v",
+			formatLogTime(), resp.StatusCode, ttfbSec, modelPart, s.pool.displayNameOf(keyState), isSSE)
 
 		flusher, isFlusher := w.(http.Flusher)
 		buf := make([]byte, 4096)
@@ -1140,9 +1162,6 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			if isSSE {
 				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %d B) | %s | Key: %s",
 					formatLogTime(), elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState))
-			} else {
-				log.Printf("%s [成功] HTTP %d %.2fs | %d B | %s | Key: %s",
-					formatLogTime(), resp.StatusCode, elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState))
 			}
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有

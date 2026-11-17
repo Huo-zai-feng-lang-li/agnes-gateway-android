@@ -1,5 +1,6 @@
 package com.agnes.gateway
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.BroadcastReceiver
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnBatteryOpt: Button
     private lateinit var tvLogs: TextView
     private lateinit var btnClearLog: Button
+    private lateinit var btnFullscreenLog: TextView
 
     // 实时运维面板控件
     private lateinit var cardPoolDashboard: LinearLayout
@@ -61,7 +63,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvCurrentKey: TextView
     private lateinit var tvAvailableKeys: TextView
     private lateinit var tvCooldownKeys: TextView
-    private lateinit var tvBannedKeys: TextView
     private lateinit var layoutAlertBanner: LinearLayout
     private lateinit var tvAlertBanner: TextView
 
@@ -69,6 +70,12 @@ class MainActivity : AppCompatActivity() {
     private var currentBaseUrl: String = ""
     private var fullscreenLogDialog: Dialog? = null
     private var fullscreenTvLogs: TextView? = null
+    private var lastSeenLogSeq = 0L
+
+    // 顶部运行状态动效
+    private var statusPulseAnimator: ValueAnimator? = null
+    private var statusFlashAnimator: ValueAnimator? = null
+    private var statusResetRunnable: Runnable? = null
 
     // 状态轮询器
     private val statusHandler = Handler(Looper.getMainLooper())
@@ -86,7 +93,9 @@ class MainActivity : AppCompatActivity() {
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val line = intent?.getStringExtra(GatewayService.EXTRA_LOG_LINE) ?: return
-            appendLog(line)
+            val seq = intent.getLongExtra(GatewayService.EXTRA_LOG_SEQ, 0L)
+            val timeMs = intent.getLongExtra(GatewayService.EXTRA_LOG_TIME, System.currentTimeMillis())
+            appendLog(line, seq, timeMs)
         }
     }
 
@@ -187,6 +196,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             registerReceiver(logReceiver, filter)
         }
+        syncMissedLogs()
         updateUIState()
         startStatusPolling()
     }
@@ -204,6 +214,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopStatusPolling()
+        cancelStatusEffects()
     }
 
     private fun initViews() {
@@ -218,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         btnToggle = findViewById(R.id.btnToggle)
         btnBatteryOpt = findViewById(R.id.btnBatteryOpt)
         tvLogs = findViewById(R.id.tvLogs)
+        btnFullscreenLog = findViewById(R.id.btnFullscreenLog)
         tvLogs.movementMethod = ScrollingMovementMethod()
 
         // 实时运维面板控件
@@ -226,7 +238,6 @@ class MainActivity : AppCompatActivity() {
         tvCurrentKey = findViewById(R.id.tvCurrentKey)
         tvAvailableKeys = findViewById(R.id.tvAvailableKeys)
         tvCooldownKeys = findViewById(R.id.tvCooldownKeys)
-        tvBannedKeys = findViewById(R.id.tvBannedKeys)
         layoutAlertBanner = findViewById(R.id.layoutAlertBanner)
         tvAlertBanner = findViewById(R.id.tvAlertBanner)
 
@@ -244,11 +255,11 @@ class MainActivity : AppCompatActivity() {
             }
             false
         }
-        tvLogs.setOnClickListener {
-            toggleFullscreenLog()
-        }
         tvLogs.setOnScrollChangeListener { _, _, _, _, _ ->
             autoScrollEnabled = isNearBottom()
+        }
+        btnFullscreenLog.setOnClickListener {
+            toggleFullscreenLog()
         }
 
         btnClearLog = findViewById(R.id.btnClearLog)
@@ -287,6 +298,7 @@ class MainActivity : AppCompatActivity() {
             tvLogs.text = ""
             fullscreenTvLogs?.text = ""
             autoScrollEnabled = true
+            GatewayService.clearLogBuffer()
         }
     }
 
@@ -352,14 +364,13 @@ class MainActivity : AppCompatActivity() {
         tvCurrentKey.text = if (lastUsed.isNotEmpty()) "当前 Key: $lastUsed" else "当前 Key: 空闲待命"
         tvAvailableKeys.text = "可用: $available"
         tvCooldownKeys.text = "限流: $cooldown"
-        tvBannedKeys.text = "封禁: $banned"
 
         if (total == 0 && banned > 0) {
-            // 所有 Key 均被 401 封禁物理剔除，维持最高级别警报
+            // 所有 Key 均被上游封禁物理剔除，维持最高级别警报
             tvPoolHealth.text = "全部已封禁"
             tvPoolHealth.setTextColor(0xFFFF1744.toInt())
             layoutAlertBanner.visibility = View.VISIBLE
-            tvAlertBanner.text = "⚠️ 严重警告：号池中全部 $banned 个 Key 均已 401 封禁失效，号池已空！"
+            tvAlertBanner.text = "⚠️ 严重警告：号池中全部 $banned 个 Key 均已封禁失效，号池已空！"
 
             if (!hasNotifiedAllUnavailable) {
                 hasNotifiedAllUnavailable = true
@@ -367,7 +378,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isFinishing && !isDestroyed) {
                     AlertDialog.Builder(this)
                         .setTitle("⚠️ 号池告警通知")
-                        .setMessage("所有配置的 Key 均已被上游 401 封禁失效并从号池移除！\n\n反代网关已无可用凭证，请补充新的有效 Key。")
+                        .setMessage("所有配置的 Key 均已被上游封禁失效并从号池移除！\n\n反代网关已无可用凭证，请补充新的有效 Key。")
                         .setPositiveButton("我知道了", null)
                         .show()
                 }
@@ -403,7 +414,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 检测到 401 封禁后，将失效 Key 从本地 etKeys 中自动移除并保存（精准黑名单定向清理，不误伤用户正输入的新 Key）
+    // 检测到 401/403 封禁后，将失效 Key 从本地 etKeys 中自动移除并保存（精准黑名单定向清理，不误伤用户正输入的新 Key）
     private fun syncBannedKeysFromGateway() {
         if (isSyncingBanned) return
         isSyncingBanned = true
@@ -439,7 +450,7 @@ class MainActivity : AppCompatActivity() {
                 if (removedCount > 0) {
                     etKeys.setText(filteredLines.joinToString("\n"))
                     savePreferences()
-                    Toast.makeText(this, "检测到 $removedCount 个 401 封禁 Key，已自动从号池移除！", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "检测到 $removedCount 个封禁 Key，已自动从号池移除！", Toast.LENGTH_LONG).show()
                     appendLog("[系统] 自动清理：已将 $removedCount 个失效封禁 Key 从本地号池移除并保存")
                 }
             } finally {
@@ -546,8 +557,10 @@ class MainActivity : AppCompatActivity() {
         val localIP = NetworkUtils.getLocalIPAddress()
 
         if (running) {
-            tvStatus.text = "● 运行中 (Running)"
-            tvStatus.setTextColor(0xFF00C853.toInt()) // 绿色
+            // 成功/失败动效播放期间不要被 2 秒轮询重置
+            if (statusResetRunnable == null && statusPulseAnimator?.isRunning != true) {
+                showRunningStatus()
+            }
             btnToggle.text = "停止反代网关"
             btnToggle.setBackgroundColor(0xFFD32F2F.toInt()) // 红色
             etPort.isEnabled = false
@@ -559,8 +572,7 @@ class MainActivity : AppCompatActivity() {
             tvLanUrl.text = if (localIP != null) "局域网其他设备用: http://$localIP:$port/v1" else "未检测到局域网 IP"
             btnCopyUrl.isEnabled = true
         } else {
-            tvStatus.text = "○ 已停止 (Stopped)"
-            tvStatus.setTextColor(0xFF9E9E9E.toInt()) // 灰色
+            showStoppedStatus()
             btnToggle.text = "启动反代网关"
             btnToggle.setBackgroundColor(0xFF2979FF.toInt()) // 蓝色
             etPort.isEnabled = true
@@ -580,17 +592,122 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendLog(msg: String) {
+    /** 取消顶部状态的全部动画与延时复位，恢复到中性状态。 */
+    private fun cancelStatusEffects() {
+        statusPulseAnimator?.cancel()
+        statusPulseAnimator = null
+        statusFlashAnimator?.cancel()
+        statusFlashAnimator = null
+        statusResetRunnable?.let { statusHandler.removeCallbacks(it) }
+        statusResetRunnable = null
+        tvStatus.alpha = 1f
+        tvStatus.scaleX = 1f
+        tvStatus.scaleY = 1f
+        tvStatus.translationX = 0f
+    }
+
+    /** 运行中：绿色呼吸灯效果。 */
+    private fun showRunningStatus() {
+        cancelStatusEffects()
+        tvStatus.text = "● 运行中"
+        tvStatus.setTextColor(0xFF00C853.toInt())
+        val animator = ValueAnimator.ofFloat(1f, 0.5f).apply {
+            duration = 900
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener { tvStatus.alpha = it.animatedValue as Float }
+            start()
+        }
+        statusPulseAnimator = animator
+    }
+
+    /** 已停止：灰色静态状态。 */
+    private fun showStoppedStatus() {
+        cancelStatusEffects()
+        tvStatus.text = "○ 已停止"
+        tvStatus.setTextColor(0xFF9E9E9E.toInt())
+    }
+
+    /** 顶部短暂显示成功/失败动效，1.6 秒后自动回到运行中。 */
+    private fun flashStatus(success: Boolean) {
+        if (!GatewayService.isRunning) return
+        cancelStatusEffects()
+        tvStatus.text = if (success) "✓ 调用成功" else "✕ 调用失败"
+        tvStatus.setTextColor(if (success) 0xFF00E676.toInt() else 0xFFFF1744.toInt())
+
+        statusFlashAnimator = if (success) {
+            ValueAnimator.ofFloat(0.85f, 1.15f, 1f).apply {
+                duration = 320
+                addUpdateListener { anim ->
+                    val scale = anim.animatedValue as Float
+                    tvStatus.scaleX = scale
+                    tvStatus.scaleY = scale
+                }
+                start()
+            }
+        } else {
+            ValueAnimator.ofFloat(0f, -7f, 7f, -4f, 4f, 0f).apply {
+                duration = 360
+                addUpdateListener { anim -> tvStatus.translationX = anim.animatedValue as Float }
+                start()
+            }
+        }
+
+        val reset = Runnable {
+            statusResetRunnable = null
+            if (GatewayService.isRunning && !isFinishing && !isDestroyed) {
+                showRunningStatus()
+            } else {
+                showStoppedStatus()
+            }
+        }
+        statusResetRunnable = reset
+        statusHandler.postDelayed(reset, 1600)
+    }
+
+    /** 只有近 5 秒内产生的新日志才触发顶部动效，避免回放历史日志误闪。 */
+    private fun maybeFlashStatus(msg: String, timeMs: Long) {
+        if (System.currentTimeMillis() - timeMs > 5000) return
+        val success = msg.contains("[成功]")
+        val failure = msg.contains("[失败]") || msg.contains("[拒绝]") ||
+            msg.contains("[断流]") || msg.contains("[封禁]") || msg.contains("[风控]") ||
+            msg.contains("[限流]") || msg.contains("[超时]") || msg.contains("[告警]")
+        when {
+            success -> flashStatus(true)
+            failure -> flashStatus(false)
+        }
+    }
+
+    /** 回前台后补拉服务端缓存日志，覆盖后台/熄屏期间错过的成功与失败记录。 */
+    private fun syncMissedLogs() {
+        val latest = GatewayService.latestLogSeq()
+        if (latest < lastSeenLogSeq) {
+            // 服务进程重启，序号归零，允许重新回放缓存
+            lastSeenLogSeq = 0L
+        }
+        GatewayService.snapshotLogs(lastSeenLogSeq).forEach { entry ->
+            appendLog(entry.line, entry.seq, entry.timeMs)
+        }
+    }
+
+    private fun appendLog(msg: String, seq: Long = 0L, timeMs: Long = System.currentTimeMillis()) {
         runOnUiThread {
-            // 检测 401 封禁事件，自动触发本地号池剔除同步
+            // 广播与补拉可能同时到达，按服务端序号去重
+            if (seq > 0L) {
+                if (seq <= lastSeenLogSeq) return@runOnUiThread
+                lastSeenLogSeq = seq
+            }
+
+            // 检测封禁事件（401/403），自动触发本地号池剔除同步
             if (msg.contains("[封禁]") && msg.contains("已从号池剔除")) {
                 syncBannedKeysFromGateway()
             }
 
-            val now = System.currentTimeMillis()
-            logLines.addLast(now to msg)
+            maybeFlashStatus(msg, timeMs)
 
-            val pruned = pruneLogs(now)
+            logLines.addLast(timeMs to msg)
+
+            val pruned = pruneLogs(System.currentTimeMillis())
             if (pruned) {
                 rebuildLogView()
             } else {
@@ -712,7 +829,7 @@ class MainActivity : AppCompatActivity() {
             sp.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
-        // 5. Key/备注高亮 (Key: xxx)
+        // 5. Key 高亮 (Key: xxx)
         PATTERN_KEY.findAll(msg).forEach {
             val start = it.range.first
             val end = it.range.last + 1
@@ -854,7 +971,14 @@ class MainActivity : AppCompatActivity() {
         val savedUpstream = sp.getString("upstream", "https://apihub.agnes-ai.cn/v1") ?: "https://apihub.agnes-ai.cn/v1"
         etUpstream.setText(if (savedUpstream == "https://agnes-ai.cn") "https://apihub.agnes-ai.cn/v1" else savedUpstream)
         etPort.setText(sp.getString("port", "8080"))
-        etKeys.setText(sp.getString("keys", ""))
+        // 备注功能已移除：旧配置里的 #备注 / ----备注 在加载时直接剥离
+        val savedKeys = sp.getString("keys", "") ?: ""
+        etKeys.setText(
+            savedKeys.lines()
+                .map { extractRawKey(it) }
+                .filter { it.isNotEmpty() }
+                .joinToString("\n")
+        )
     }
 
     private fun savePreferences() {
