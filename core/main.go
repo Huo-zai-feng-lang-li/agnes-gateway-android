@@ -46,7 +46,7 @@ func formatLogTime() string {
 	return time.Now().In(localLocation).Format("15:04:05")
 }
 
-const logDivider = "──────────────────────────────"
+const logDivider = "───────────────"
 
 var (
 	logBoundaryMu           sync.Mutex
@@ -61,7 +61,7 @@ func logSuccess(ts string, status int, firstByteSec, elapsedSec float64, modelPa
 
 	prefix := ""
 	if lastLoggedKey != "" && lastLoggedKey != keyDisplay && !dividerPrintedForSwitch {
-		prefix = fmt.Sprintf("%s %s\n", ts, logDivider)
+		prefix = fmt.Sprintf("%s\n", logDivider)
 	}
 	log.Printf("%s%s", prefix, formatSuccessLog(ts, status, firstByteSec, elapsedSec, modelPart, keyDisplay, sentBytes))
 	lastLoggedKey = keyDisplay
@@ -83,9 +83,9 @@ func logKeySwitch(keyDisplay, message string) {
 	ts := formatLogTime()
 	dividerPrintedForSwitch = true
 	if keyDisplay != "" {
-		log.Printf("%s %s\n%s [切号] %s %s", ts, logDivider, ts, keyDisplay, message)
+		log.Printf("%s\n%s [切号] %s %s", logDivider, ts, keyDisplay, message)
 	} else {
-		log.Printf("%s %s\n%s [切号] %s", ts, logDivider, ts, message)
+		log.Printf("%s\n%s [切号] %s", logDivider, ts, message)
 	}
 }
 

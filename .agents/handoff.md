@@ -159,8 +159,14 @@
     - 顶部间距收紧：根布局 16→12dp、状态卡外边距 16→12dp、状态卡顶部内边距 16→12dp。
     - 新增 `app/src/main/res/drawable/bg_card.xml`，四个外层模块统一 10dp 圆角。
     - 版本递增至 **versionCode 21 / versionName 1.0.21**。
+41. **v1.0.22：分隔线与外边距微调**
+    - 分隔线去掉时间前缀，长度由 30 个 `─` 缩短为 15 个。
+    - 根布局上下左右 padding 统一为 8dp，页面更贴近屏幕边缘。
+    - 外层模块圆角由 10dp 改为 8dp。
+    - 版本递增至 **versionCode 22 / versionName 1.0.22**。
 
 ## 未完成 / 下一步
+- v1.0.22 已改完：分隔线无时间前缀且长度减半、根布局四边 8dp、外层卡片 8dp 圆角；待测试、交叉编译、提交、打 tag v1.0.22 并发布 Release。
 - v1.0.21 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21，APK 7,171,768 B，SHA256 `0037E0E0C92B81909C6B1E37605EF2C9E895E860ABCD659B4DCCC4A2B6B99852`。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。

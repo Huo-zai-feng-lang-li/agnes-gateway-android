@@ -85,6 +85,12 @@ func TestLogSuccessKeyChangeDivider(t *testing.T) {
 	if got := strings.Count(buf.String(), logDivider); got != 2 {
 		t.Fatalf("换号分隔线数量 = %d, want 2，日志:\n%s", got, buf.String())
 	}
+	if strings.Contains(buf.String(), "22:56:02 "+logDivider) {
+		t.Fatalf("分隔线不应带时间前缀，日志:\n%s", buf.String())
+	}
+	if len([]rune(logDivider)) != 15 {
+		t.Fatalf("分隔线长度 = %d, want 15", len([]rune(logDivider)))
+	}
 }
 
 func TestFormatByteSize(t *testing.T) {
