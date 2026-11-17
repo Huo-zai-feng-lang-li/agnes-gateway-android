@@ -149,7 +149,9 @@
     - 版本递增至 **versionCode 19 / versionName 1.0.19**。
 
 ## 未完成 / 下一步
-- v1.0.19 已改完：页面左右 padding 16dp → 12dp、底部 16dp → 8dp，待提交、打 tag v1.0.19 并由 GitHub Actions 发布 Release。
+- v1.0.19 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
+- Release 资产：`AgnesGateway-v1.0.19.apk`（7,169,340 B，sha256 `1DCED9026C7C448BB7DABEF405CCAC1876EC6BCB92E83E7C60229BBA994B5398`，本地下载核对一致）。
+- v1.0.19 待真机验收：页面左右 12dp、底部 8dp 留白是否合适。
 - v1.0.18 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18
 - Release 资产：`AgnesGateway-v1.0.18.apk`（7,169,300 B，sha256 `7F98FC8211A370E79B20D078A194331616477441916128F8646CA232D1E9DAF2`，本地下载核对一致）。
 - v1.0.18 待真机验收：顶部“运行中”水波纹放大后的视觉大小与文字间距。
