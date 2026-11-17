@@ -17,6 +17,7 @@
 ### 验证
 - `go test -count=1 ./...` 通过；新增免费模型通用 403 封禁用例，原有 403 风控切号用例改为断言 Key 被物理剔除。
 - `go vet ./...` 通过。
+- arm64 交叉编译与 jniLibs SHA256 一致：`13AC18D443988C72CCBAE49C7860905D3A46B7CFB2F65855E25FCC60CB964768`。
 - Android 侧 GitHub Actions `main` 构建 44097012997 与 `v1.0.13` 发布构建 44097469886 均 success；Release 资产 `AgnesGateway-v1.0.13.apk`（7,166,056 B，sha256 `417baf850df9a5f407c7089ea64f0a381562955ac229041a613408b200ea0207`）。
 
 ## [v1.0.12] - 2026-11-17
