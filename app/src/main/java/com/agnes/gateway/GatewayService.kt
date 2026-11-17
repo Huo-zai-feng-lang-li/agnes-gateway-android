@@ -55,6 +55,11 @@ class GatewayService : Service() {
         var isRunning: Boolean = false
             private set
 
+        /** 前台服务启动时刻，用于界面显示运行时长；停止时归零。 */
+        @Volatile
+        var startedAtMs: Long = 0L
+            private set
+
         /** 记录日志到环形缓存并返回带序号的条目。 */
         @Synchronized
         private fun recordLog(msg: String): GatewayLogEntry {
@@ -139,6 +144,9 @@ class GatewayService : Service() {
         val dns = intent?.getStringExtra(EXTRA_DNS) ?: ""
 
         startForeground(NOTIFICATION_ID, buildNotification(port))
+        if (!isRunning) {
+            startedAtMs = System.currentTimeMillis()
+        }
         isRunning = true
 
         startGatewayProcess(port, upstream, keys, dns)
@@ -349,6 +357,7 @@ class GatewayService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        startedAtMs = 0L
         try {
             process?.destroyForcibly()
         } catch (_: Exception) {

@@ -84,6 +84,22 @@ func readUpstreamError(body io.Reader) []byte {
 	return b
 }
 
+// formatByteSize 将字节数转成人能直观看懂的单位（B / KB / MB / GB）。
+func formatByteSize(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	value := float64(n)
+	units := []string{"KB", "MB", "GB", "TB"}
+	for _, unit := range units {
+		value /= 1024
+		if value < 1024 || unit == "TB" {
+			return fmt.Sprintf("%.1f %s", value, unit)
+		}
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
 // isFreeModel 判断是否为免费模型（2.5 / 3.0 Flash）。免费模型没有额度限制，
 // 除明确额度/模型权限/网段问题外的 403 一律视为 Key 被封。
 func isFreeModel(model string) bool {
@@ -1131,8 +1147,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-r.Context().Done():
-				log.Printf("%s [中断] 客户端断开 (%.2fs, 下发 %d B) | %s | Key: %s",
-					formatLogTime(), time.Since(reqStart).Seconds(), sentBytes, modelPart, s.pool.displayNameOf(keyState))
+				log.Printf("%s [中断] 客户端断开 (%.2fs, 下发 %s) | %s | Key: %s",
+					formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState))
 				io.CopyN(io.Discard, resp.Body, 64*1024)
 				return
 			default:
@@ -1141,8 +1157,8 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			n, rErr := resp.Body.Read(buf)
 			if n > 0 {
 				if _, wErr := w.Write(buf[:n]); wErr != nil {
-					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %d B) | %s | Key: %s | %v",
-						formatLogTime(), time.Since(reqStart).Seconds(), sentBytes, modelPart, s.pool.displayNameOf(keyState), wErr)
+					log.Printf("%s [断流] 写回客户端失败 (%.2fs, 下发 %s) | %s | Key: %s | %v",
+						formatLogTime(), time.Since(reqStart).Seconds(), formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState), wErr)
 					io.CopyN(io.Discard, resp.Body, 64*1024)
 					return
 				}
@@ -1160,13 +1176,13 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		elapsedSec := time.Since(reqStart).Seconds()
 		if readErr == io.EOF {
 			if isSSE {
-				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %d B) | %s | Key: %s",
-					formatLogTime(), elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState))
+				log.Printf("%s [完成] 流式结束 (%.2fs, 下发 %s) | %s | Key: %s",
+					formatLogTime(), elapsedSec, formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState))
 			}
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
-			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %d B) | %s | Key: %s | %v",
-				formatLogTime(), elapsedSec, sentBytes, modelPart, s.pool.displayNameOf(keyState), readErr)
+			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s) | %s | Key: %s | %v",
+				formatLogTime(), elapsedSec, formatByteSize(sentBytes), modelPart, s.pool.displayNameOf(keyState), readErr)
 		}
 		return
 	}

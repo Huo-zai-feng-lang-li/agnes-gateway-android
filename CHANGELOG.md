@@ -2,6 +2,16 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.15] - 2026-11-17
+
+### 优化
+- **`[成功]` 与 `[完成]` 日志分色**：成功仍为鲜绿色，完成改为浅蓝色，流式调用结束不再和成功混成同一条绿线。
+- **顶部水波纹状态动效**：状态点改为“中心圆点 + 两圈向外扩散并淡出的水波纹”；运行中显示“运行中 + HH:MM:SS”运行时长，停止时回归灰色静态圆点并隐藏时长；成功/失败时波纹短暂变绿/变红，1.6 秒后恢复。
+- **下发数据量人类可读**：`[完成] / [断流] / [中断]` 日志中的 `下发 6844 B` 改为 `下发 6.7 KB`，超过 1024 KB 自动转 MB，超过 1024 MB 自动转 GB。
+
+### 验证
+- 新增 `formatByteSize` 单测（0 B、999 B、1.0 KB、6.7 KB、1.0 MB、3.0 MB）；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+
 ## [v1.0.13] - 2026-11-17
 
 ### 修复与变更
@@ -198,6 +208,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.15]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.15
 [v1.0.13]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
 [v1.0.12]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.11

@@ -40,10 +40,13 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.ArrayDeque
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
+    private lateinit var statusRipple: StatusRippleView
+    private lateinit var tvRuntime: TextView
     private lateinit var tvLocalUrl: TextView
     private lateinit var tvLanUrl: TextView
     private lateinit var btnCopyUrl: Button
@@ -73,7 +76,6 @@ class MainActivity : AppCompatActivity() {
     private var lastSeenLogSeq = 0L
 
     // 顶部运行状态动效
-    private var statusPulseAnimator: ValueAnimator? = null
     private var statusFlashAnimator: ValueAnimator? = null
     private var statusResetRunnable: Runnable? = null
 
@@ -82,6 +84,21 @@ class MainActivity : AppCompatActivity() {
     private var isPollingStatus = false
     private var hasNotifiedAllUnavailable = false
     private var isSyncingBanned = false
+    private var isRuntimeTicking = false
+
+    private val runtimeRunnable = object : Runnable {
+        override fun run() {
+            if (!GatewayService.isRunning) {
+                tvRuntime.visibility = View.GONE
+                isRuntimeTicking = false
+                return
+            }
+            updateRuntimeText()
+            if (isRuntimeTicking) {
+                statusHandler.postDelayed(this, 1000)
+            }
+        }
+    }
 
     // 日志滚动保留上限：条数与时间双限，避免无界增长
     private val logLines = ArrayDeque<Pair<Long, String>>()
@@ -204,6 +221,9 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         stopStatusPolling()
+        stopRuntimeTicker()
+        cancelStatusEffects()
+        statusRipple.stopRipple()
         try {
             unregisterReceiver(logReceiver)
         } catch (_: Exception) {
@@ -214,11 +234,15 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopStatusPolling()
+        stopRuntimeTicker()
         cancelStatusEffects()
+        statusRipple.stopRipple()
     }
 
     private fun initViews() {
         tvStatus = findViewById(R.id.tvStatus)
+        statusRipple = findViewById(R.id.statusRipple)
+        tvRuntime = findViewById(R.id.tvRuntime)
         tvLocalUrl = findViewById(R.id.tvLocalUrl)
         tvLanUrl = findViewById(R.id.tvLanUrl)
         btnCopyUrl = findViewById(R.id.btnCopyUrl)
@@ -558,7 +582,7 @@ class MainActivity : AppCompatActivity() {
 
         if (running) {
             // 成功/失败动效播放期间不要被 2 秒轮询重置
-            if (statusResetRunnable == null && statusPulseAnimator?.isRunning != true) {
+            if (statusResetRunnable == null) {
                 showRunningStatus()
             }
             btnToggle.text = "停止反代网关"
@@ -592,10 +616,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 取消顶部状态的全部动画与延时复位，恢复到中性状态。 */
+    /** 取消顶部成功/失败动效与延时复位，不改动水波纹。 */
     private fun cancelStatusEffects() {
-        statusPulseAnimator?.cancel()
-        statusPulseAnimator = null
         statusFlashAnimator?.cancel()
         statusFlashAnimator = null
         statusResetRunnable?.let { statusHandler.removeCallbacks(it) }
@@ -606,26 +628,54 @@ class MainActivity : AppCompatActivity() {
         tvStatus.translationX = 0f
     }
 
-    /** 运行中：绿色呼吸灯效果。 */
+    /** 运行中：绿色水波纹 + 运行时长。 */
     private fun showRunningStatus() {
         cancelStatusEffects()
-        tvStatus.text = "● 运行中"
+        tvStatus.text = "运行中"
         tvStatus.setTextColor(0xFF00C853.toInt())
-        val animator = ValueAnimator.ofFloat(1f, 0.5f).apply {
-            duration = 900
-            repeatCount = ValueAnimator.INFINITE
-            repeatMode = ValueAnimator.REVERSE
-            addUpdateListener { tvStatus.alpha = it.animatedValue as Float }
-            start()
-        }
-        statusPulseAnimator = animator
+        statusRipple.setRippleColor(0xFF00C853.toInt())
+        statusRipple.startRipple()
+        tvRuntime.visibility = View.VISIBLE
+        updateRuntimeText()
+        startRuntimeTicker()
     }
 
-    /** 已停止：灰色静态状态。 */
+    /** 已停止：灰色静态圆点，隐藏运行时长。 */
     private fun showStoppedStatus() {
         cancelStatusEffects()
-        tvStatus.text = "○ 已停止"
+        statusRipple.stopRipple()
+        statusRipple.setRippleColor(0xFF9E9E9E.toInt())
+        tvStatus.text = "已停止"
         tvStatus.setTextColor(0xFF9E9E9E.toInt())
+        tvRuntime.visibility = View.GONE
+        tvRuntime.text = ""
+        stopRuntimeTicker()
+    }
+
+    private fun startRuntimeTicker() {
+        if (isRuntimeTicking) return
+        isRuntimeTicking = true
+        statusHandler.post(runtimeRunnable)
+    }
+
+    private fun stopRuntimeTicker() {
+        isRuntimeTicking = false
+        statusHandler.removeCallbacks(runtimeRunnable)
+    }
+
+    /** 顶部只显示 HH:MM:SS，不额外加“运行时间”前缀。 */
+    private fun updateRuntimeText() {
+        val startedAt = GatewayService.startedAtMs
+        if (!GatewayService.isRunning || startedAt <= 0L) {
+            tvRuntime.visibility = View.GONE
+            return
+        }
+        val totalSec = ((System.currentTimeMillis() - startedAt) / 1000L).coerceAtLeast(0L)
+        val hours = totalSec / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        tvRuntime.text = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+        tvRuntime.visibility = View.VISIBLE
     }
 
     /** 顶部短暂显示成功/失败动效，1.6 秒后自动回到运行中。 */
@@ -634,6 +684,10 @@ class MainActivity : AppCompatActivity() {
         cancelStatusEffects()
         tvStatus.text = if (success) "✓ 调用成功" else "✕ 调用失败"
         tvStatus.setTextColor(if (success) 0xFF00E676.toInt() else 0xFFFF1744.toInt())
+        statusRipple.setRippleColor(if (success) 0xFF00E676.toInt() else 0xFFFF1744.toInt())
+        statusRipple.startRipple()
+        tvRuntime.visibility = View.VISIBLE
+        updateRuntimeText()
 
         statusFlashAnimator = if (success) {
             ValueAnimator.ofFloat(0.85f, 1.15f, 1f).apply {
@@ -779,7 +833,8 @@ class MainActivity : AppCompatActivity() {
             msg.contains("[超时]") || msg.contains("[避让]") || msg.contains("[风控]") -> 0xFFFFB74D.toInt() // 橙黄色
             msg.contains("[切号]") -> 0xFF00E5FF.toInt() // 青色
             msg.contains("[中断]") -> 0xFF8B949E.toInt() // 灰色
-            msg.contains("[成功]") || msg.contains("[完成]") -> 0xFF3FB950.toInt() // 鲜绿色
+            msg.contains("[成功]") -> 0xFF3FB950.toInt() // 成功：鲜绿色
+            msg.contains("[完成]") -> 0xFF79C0FF.toInt() // 完成：浅蓝色，与成功区分
             msg.contains("[告警]") -> 0xFFFF1744.toInt() // 警示红
             msg.startsWith("[系统]") || msg.startsWith("[DNS]") -> 0xFF58A6FF.toInt() // 系统蓝
             msg.startsWith("===") -> 0xFF8B949E.toInt()
@@ -799,7 +854,8 @@ class MainActivity : AppCompatActivity() {
         PATTERN_TAG.findAll(msg).forEach {
             val tag = it.value
             val tagColor = when {
-                tag == "[成功]" || tag == "[完成]" || tag.matches(PATTERN_TAG_2XX) -> 0xFF3FB950.toInt()
+                tag == "[成功]" || tag.matches(PATTERN_TAG_2XX) -> 0xFF3FB950.toInt()
+                tag == "[完成]" -> 0xFF79C0FF.toInt()
                 tag == "[限流]" || tag == "[429]" || tag == "[超时]" || tag == "[避让]" || tag == "[风控]" -> 0xFFFFB74D.toInt()
                 tag == "[切号]" -> 0xFF00E5FF.toInt()
                 tag == "[中断]" -> 0xFF8B949E.toInt()

@@ -115,11 +115,16 @@
     - 测试：新增免费模型通用 403 封禁用例；403 风控用例改为断言 Key 被物理剔除。`go test -count=1 ./...` 与 `go vet ./...` 通过。
     - 版本递增至 **versionCode 14 / versionName 1.0.13**；arm64 与 jniLibs SHA256 = `13AC18D443988C72CCBAE49C7860905D3A46B7CFB2F65855E25FCC60CB964768`（两侧一致）。
 
+34. **v1.0.15：日志分色、顶部水波纹与数据量格式化**
+    - `[成功]` 保持鲜绿色，`[完成]` 改为浅蓝色（`#79C0FF`），流式结束不再与成功同色。
+    - 新增 `StatusRippleView`：中心圆点 + 两圈扩散水波纹；顶部显示“运行中 + HH:MM:SS”，停止时灰色静态点并隐藏时长；成功/失败波纹短暂变绿/变红。
+    - `GatewayService` 新增 `startedAtMs`，前台服务启动时记录，停止时归零。
+    - Go 新增 `formatByteSize`，`[完成]/[断流]/[中断]` 的下发字节数改为 B/KB/MB/GB。
+    - 新增字节格式化单测；`go test -count=1 ./...` 与 `go vet ./...` 通过。
+    - 版本递增至 **versionCode 15 / versionName 1.0.15**。
+
 ## 未完成 / 下一步
-- v1.0.13 已提交（a2f62ba）、推送 main、打 tag v1.0.13；CI 44097012997（main）与 44097469886（tag）均 success。
-- Release：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.13
-- Release 资产：`AgnesGateway-v1.0.13.apk`（7,166,056 B，sha256 `417baf850df9a5f407c7089ea64f0a381562955ac229041a613408b200ea0207`）。
-- 用户侧：安装 v1.0.13 覆盖升级；旧配置里的 `#备注` 会自动剥离。
+- v1.0.15 代码已改完，待交叉编译 arm64、同步 jniLibs、提交、推送 main、打 tag v1.0.15 并由 GitHub Actions 发布 Release。
 
 ## 关键文件
 - .github/workflows/build-apk.yml：keystore 解码 + assembleRelease + 条件发布（仅 tag）

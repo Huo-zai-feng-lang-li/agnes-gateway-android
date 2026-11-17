@@ -12,6 +12,25 @@ import (
 	"time"
 )
 
+func TestFormatByteSize(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 B"},
+		{999, "999 B"},
+		{1024, "1.0 KB"},
+		{6844, "6.7 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{3 * 1024 * 1024, "3.0 MB"},
+	}
+	for _, c := range cases {
+		if got := formatByteSize(c.in); got != c.want {
+			t.Fatalf("formatByteSize(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestPoolManager_NormalizationAndMask(t *testing.T) {
 	pool := NewPoolManager("https://apihub.agnes-ai.cn/v1/", 120)
 	if pool.upstreamURL != "https://apihub.agnes-ai.cn" {
