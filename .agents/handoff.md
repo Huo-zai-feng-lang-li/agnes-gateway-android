@@ -153,8 +153,15 @@
     - 首字时间取第一次读到上游正文，结束时间取流式响应结束，均相对请求开始。
     - 每次 `[切号]` 前插入灰色 `────` 分隔线；Android 顶部成功动效改为识别 `[2xx]`。
     - 版本递增至 **versionCode 20 / versionName 1.0.20**。
+40. **v1.0.21：日志精简与模块圆角**
+    - 成功第二行去掉“首字/结束”文字：`[200] 0.82s → 3.20s | A3F | IhIM`。
+    - Key 变化时分隔线改为 `logSuccess` 统一处理：正常轮询换 Key 也插入；`[切号]` 已插入后不重复。
+    - 顶部间距收紧：根布局 16→12dp、状态卡外边距 16→12dp、状态卡顶部内边距 16→12dp。
+    - 新增 `app/src/main/res/drawable/bg_card.xml`，四个外层模块统一 10dp 圆角。
+    - 版本递增至 **versionCode 21 / versionName 1.0.21**。
 
 ## 未完成 / 下一步
+- v1.0.21 已改完：第二行去掉“首字/结束”、Key 变化分隔线、顶部间距收紧、模块 10dp 圆角；待交叉编译、提交、打 tag v1.0.21 并发布 Release。
 - v1.0.20 已发布：https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 - Release 资产：`AgnesGateway-v1.0.20.apk`（7,169,976 B，sha256 `38A9CDD4084E2514E9CF542A0ABC2AB29210A48CF8E47B12E02C3C8E3D294CD5`，本地下载核对一致）。
 - v1.0.20 待真机验收：两行成功日志、首字/结束耗时、换号前分隔线、顶部成功动效识别 `[200]`。

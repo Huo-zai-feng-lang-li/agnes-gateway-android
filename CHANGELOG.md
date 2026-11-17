@@ -2,6 +2,20 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.21] - 2026-11-17
+
+### 优化
+- **第二行去掉“首字/结束”文字**：改为 `[200] 0.82s → 3.20s | A3F | IhIM`，前一个时间是首字，后一个时间是流结束。
+- **Key 变化也插入分隔线**：不仅 `[切号]` 前有分隔线，正常轮询切换到不同 Key 的成功块前也会插入；若刚输出过 `[切号]` 分隔线，则不会重复插入。
+- **顶部间距收紧**：根布局顶部 16dp → 12dp，状态卡片顶部外边距 16dp → 12dp，状态卡片内部顶部 padding 16dp → 12dp。
+- **卡片轻微圆角**：新增 `bg_card.xml`，四个外层模块统一使用 10dp 圆角背景。
+- 仅 Android 布局与日志展示改动；Go 网关日志逻辑同步调整。
+
+### 验证
+- `go test -count=1 ./...` 与 `go vet ./...` 通过，新增 `TestFormatSuccessLog`、`TestLogSuccessKeyChangeDivider`。
+- arm64 内核 SHA256：`8F97B83793FB86E1CB2828F590E401D80D290A377ED6A7546BECE9D68F5ACA58`；`core/agnes-gateway-arm64` 与 `jniLibs/arm64-v8a/libgateway.so` 一致。
+- 待 GitHub Actions 构建与 Release 后回填 APK 信息。
+
 ## [v1.0.20] - 2026-11-17
 
 ### 优化
@@ -278,6 +292,7 @@
 - 运行中热重载：支持免重启热更新 Key 号池。
 - 局域网直接调用 `http://<手机IP>:8080/v1`。
 
+[v1.0.21]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.21
 [v1.0.20]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.20
 [v1.0.19]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.19
 [v1.0.18]: https://github.com/Huo-zai-feng-lang-li/agnes-gateway-android/releases/tag/v1.0.18

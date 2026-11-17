@@ -850,7 +850,7 @@ class MainActivity : AppCompatActivity() {
             sp.setSpan(ForegroundColorSpan(0xFF8B949E.toInt()), it.range.first, it.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
-        // 2. 状态标签特殊高亮 [成功] / [风控] / [拒绝] / [断流] / [切号] / [告警] / [xxx]
+        // 2. 状态标签特殊高亮 [2xx] / [风控] / [拒绝] / [断流] / [切号] / [告警] / [xxx]
         PATTERN_TAG.findAll(msg).forEach {
             val tag = it.value
             val tagColor = when {

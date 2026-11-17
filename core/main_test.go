@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,9 +55,35 @@ func TestEstimateCharCount(t *testing.T) {
 
 func TestFormatSuccessLog(t *testing.T) {
 	got := formatSuccessLog("22:56:02", 200, 0.82, 3.20, "A3F", "IhIM", 1874)
-	want := "22:56:02 | 1.8 KB · 约 624 字\n[200] 首字 0.82s | 结束 3.20s | A3F | IhIM"
+	want := "22:56:02 | 1.8 KB · 约 624 字\n[200] 0.82s → 3.20s | A3F | IhIM"
 	if got != want {
 		t.Fatalf("formatSuccessLog() = %q, want %q", got, want)
+	}
+}
+
+func TestLogSuccessKeyChangeDivider(t *testing.T) {
+	oldOutput, oldFlags := log.Writer(), log.Flags()
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldOutput)
+		log.SetFlags(oldFlags)
+	}()
+
+	// 使用独立缓冲观察换号边界，避免把测试日志写进真实 stderr
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	logBoundaryMu.Lock()
+	lastLoggedKey = ""
+	dividerPrintedForSwitch = false
+	logBoundaryMu.Unlock()
+
+	logSuccess("22:56:02", 200, 0.1, 0.2, "A3F", "IhIM", 100)
+	logKeySwitch("YgPv", "测试切号")
+	logSuccess("22:56:03", 200, 0.1, 0.2, "A3F", "YgPv", 100)
+	logSuccess("22:56:04", 200, 0.1, 0.2, "A3F", "qpxk", 100)
+
+	if got := strings.Count(buf.String(), logDivider); got != 2 {
+		t.Fatalf("换号分隔线数量 = %d, want 2，日志:\n%s", got, buf.String())
 	}
 }
 

@@ -48,16 +48,40 @@ func formatLogTime() string {
 
 const logDivider = "──────────────────────────────"
 
+var (
+	logBoundaryMu           sync.Mutex
+	lastLoggedKey           string
+	dividerPrintedForSwitch bool
+)
+
+// logSuccess 在 Key 发生变化时先插入分隔线，再输出两行成功日志。
+func logSuccess(ts string, status int, firstByteSec, elapsedSec float64, modelPart, keyDisplay string, sentBytes int64) {
+	logBoundaryMu.Lock()
+	defer logBoundaryMu.Unlock()
+
+	prefix := ""
+	if lastLoggedKey != "" && lastLoggedKey != keyDisplay && !dividerPrintedForSwitch {
+		prefix = fmt.Sprintf("%s %s\n", ts, logDivider)
+	}
+	log.Printf("%s%s", prefix, formatSuccessLog(ts, status, firstByteSec, elapsedSec, modelPart, keyDisplay, sentBytes))
+	lastLoggedKey = keyDisplay
+	dividerPrintedForSwitch = false
+}
+
 // formatSuccessLog 生成两行成功日志：第一行时间与数据量，第二行响应码与耗时信息。
 func formatSuccessLog(ts string, status int, firstByteSec, elapsedSec float64, modelPart, keyDisplay string, sentBytes int64) string {
-	return fmt.Sprintf("%s | %s · 约 %d 字\n[%d] 首字 %.2fs | 结束 %.2fs | %s | %s",
+	return fmt.Sprintf("%s | %s · 约 %d 字\n[%d] %.2fs → %.2fs | %s | %s",
 		ts, formatByteSize(sentBytes), estimateCharCount(sentBytes),
 		status, firstByteSec, elapsedSec, modelPart, keyDisplay)
 }
 
 // logKeySwitch 在换号前输出一条分隔线，再输出换号日志；正常成功仍按两行记录。
 func logKeySwitch(keyDisplay, message string) {
+	logBoundaryMu.Lock()
+	defer logBoundaryMu.Unlock()
+
 	ts := formatLogTime()
+	dividerPrintedForSwitch = true
 	if keyDisplay != "" {
 		log.Printf("%s %s\n%s [切号] %s %s", ts, logDivider, ts, keyDisplay, message)
 	} else {
@@ -1225,9 +1249,9 @@ func (s *GatewayServer) forwardRequest(w http.ResponseWriter, r *http.Request) {
 			if !firstByteSet {
 				firstByteSec = elapsedSec
 			}
-			// 两行一条成功记录：第一行时间 + 数据量，第二行响应码 + 首字/结束耗时 + 模型 + Key。
-			log.Printf("%s", formatSuccessLog(formatLogTime(), resp.StatusCode,
-				firstByteSec, elapsedSec, modelPart, s.pool.displayNameOf(keyState), sentBytes))
+			// 两行一条成功记录：第一行时间 + 数据量，第二行响应码 + 两次耗时 + 模型 + Key。
+			logSuccess(formatLogTime(), resp.StatusCode, firstByteSec, elapsedSec, modelPart,
+				s.pool.displayNameOf(keyState), sentBytes)
 		} else {
 			// 上游在中途断流时必须留痕，否则客户端长任务突然终止，手机日志里什么都没有
 			log.Printf("%s [断流] 上游中断 (%.2fs, 下发 %s · 约 %d 字) | %s | %s | %v",
