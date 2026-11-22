@@ -241,18 +241,21 @@ class GatewayService : Service() {
                     "--upstream=$upstream"
                 )
                 if (keys.isNotBlank()) {
-                    // 替换回车为逗号
+                    // Key 池写入 App 私有目录（/data/user/0/<pkg>/files，0700 仅本应用可读），
+                    // 进程用 --keys-file 读取，避免明文出现在 /proc/PID/cmdline（任意应用可读）
+                    val keyFile = File(filesDir, "gateway_keys.txt")
                     val formattedKeys = keys.lines()
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
-                        .joinToString(",")
-                    cmdList.add("--keys=$formattedKeys")
+                        .joinToString("\n")
+                    keyFile.writeText(formattedKeys)
+                    cmdList.add("--keys-file=${keyFile.absolutePath}")
                 }
                 if (dns.isNotBlank()) {
                     cmdList.add("--dns=$dns")
                 }
 
-                broadcastLog("[系统] 启动命令: ${cmdList.map { if (it.startsWith("--keys=")) "--keys=***" else it }.joinToString(" ")}")
+                broadcastLog("[系统] 启动命令: ${cmdList.map { if (it.startsWith("--keys")) "--keys=***" else it }.joinToString(" ")}")
                 val processBuilder = ProcessBuilder(cmdList)
                 processBuilder.redirectErrorStream(true)
 
