@@ -2,6 +2,16 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.29] - 2026-11-22
+
+### 安全
+- **API Key 不再出现在网关进程启动参数中**。`/proc/PID/cmdline` 权限 0444 且 SELinux 不限制跨应用读取，本机任意应用此前可读到明文 Key 池。现改为启动前将 Key 池写入 App 私有目录 `files/gateway_keys.txt`（0700，仅本应用 uid 可读），进程以 `--keys-file` 读取；Go 核心原生支持该 flag，零改动。
+- **日志脱敏条件同步覆盖新参数名**，启动命令日志不打 Key 文件路径以外的密钥材料。
+
+### 验证
+- CI dev 构建（commit `695e668`，run `45028076204`）编译与签名通过。
+- 真机实测：网关进程 cmdline 明文 Key 数量 0（仅 `--keys-file=` 路径）；`/_gateway/status` 显示 12/12 Key 经文件路径成功加载、available 12/12；`/_gateway/models` 经新代码反代 200 返回模型列表。
+
 ## [v1.0.28] - 2026-11-17
 
 ### 优化
